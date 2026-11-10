@@ -157,12 +157,53 @@ async function photon(q,bias){
   const r=await fetch(u);if(!r.ok)throw new Error("photon "+r.status);return r.json();
 }
 function streetKey(s){return s.toLowerCase().replace(/\s+\d+\s*[a-z]?\s*$/,"").replace(/\b(via|viale|corso|piazza|piazzale|largo|vicolo|strada|località|scala|salita|contrada)\b/g,"").replace(/[^a-zà-ü]/g,"")}
-async function geocodeOne(addr,city,cap,center){
+/* nome commerciale "pulito" per la ricerca: toglie forma societaria e titolare */
+function cleanName(n){
+  let s=String(n||"").replace(/^\d+_GESTOR_/i,"").replace(/["“”]/g," ");
+  s=s.split(/\s(?:DI|DEI|DELLA|DEL)\s+[A-Z][A-Z']+\s+[A-Z][A-Z']+.*$/)[0];
+  s=s.replace(/\b(S\.?\s?R\.?\s?L\.?S?|S\.?\s?N\.?\s?C\.?|S\.?\s?A\.?\s?S\.?|S\.?\s?P\.?\s?A\.?|SOCIETA'?\s.*|SOC\.?\s.*|SOCIET[AÀ]\s.*|IMPRESA SOCIALE|COOPERATIVA.*|& C\.?|E C\.)\s*$/i,"");
+  s=s.replace(/\b(S\.?\s?R\.?\s?L\.?S?|S\.?\s?N\.?\s?C\.?|S\.?\s?A\.?\s?S\.?)\b\.?/ig,"").replace(/[\s,.-]+$/,"").replace(/\s+/g," ").trim();
+  return s.length>=3?titleCase(s):"";
+}
+const nameToks=x=>String(x||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").split(/[^a-z0-9]+/).filter(w=>w.length>2&&!/^(bar|the|del|della|dei|di|ristorante|pizzeria|hotel|albergo|caffe|cafe|caffetteria|osteria|trattoria|gelateria|pasticceria|panificio|birreria|enoteca|pub|market|alimentari|macelleria|bistrot|locanda|srl|snc|sas|spa|via|and|con)$/.test(w));
+function nameMatch(want,got,city){const cs=nameToks(city);const a=nameToks(want).filter(w=>!cs.includes(w)),b=nameToks(got);if(!a.length||!b.length)return false;const hit=a.filter(w=>b.includes(w)).length;return hit>=Math.min(2,a.length)||(hit>=1&&a.length<=2)}
+const sameCity=(p,city,center)=>{const c=(p.city||p.town||p.village||p.municipality||"").toLowerCase();return (c&&c===city.toLowerCase())||(!c&&center&&km(p._pt,center)<8)};
+/* cerca l'attività per nome (OpenStreetMap / Google) nella stessa città */
+async function findByName(names,city,center){
+  for(const nm of names){
+    if(!nm)continue;
+    if(await loadGoogle()){
+      try{const {results}=await new google.maps.Geocoder().geocode({address:nm+", "+city+", Italia",region:"it"});
+        const r=(results||[]).find(r=>(r.types||[]).some(t=>t==="establishment"||t==="point_of_interest"||t==="food"));
+        if(r){const l=r.geometry.location,pt={lat:l.lat(),lon:l.lng()};if(!center||km(pt,center)<12)return {...pt,name:nm,where:r.formatted_address.split(",").slice(0,2).join(",")}}}catch(e){}
+    }
+    try{
+      const j=await photon(nm+" "+city,center);
+      for(const f of j.features||[]){
+        const p=f.properties;p._pt={lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]};
+        if(!p.name||!nameMatch(nm,p.name,city))continue;
+        if(!sameCity(p,city,center))continue;
+        return {...p._pt,name:p.name,where:[p.street,p.housenumber].filter(Boolean).join(" ")||p.district||city,street:p.street||""};
+      }
+    }catch(e){}
+    try{
+      const j=await nominatim({q:nm+", "+city});
+      for(const x of j){const pt={lat:+x.lat,lon:+x.lon};const a=x.address||{};
+        const nmx=x.name||(x.display_name||"").split(",")[0];
+        if(!nameMatch(nm,nmx,city))continue;
+        const c=(a.city||a.town||a.village||a.municipality||"").toLowerCase();
+        if(c!==city.toLowerCase()&&!(center&&km(pt,center)<8))continue;
+        return {...pt,name:nmx,where:[a.road,a.house_number].filter(Boolean).join(" ")||city,street:a.road||""};}
+    }catch(e){}
+  }
+  return null;
+}
+async function geocodeOne(addr,city,cap,center,names){
   const q=addr+", "+(cap?cap+" ":"")+city;
-  const key=q.toLowerCase();
+  const key=q.toLowerCase()+"|"+(names||[]).join("|").toLowerCase();
   if(geoCache[key])return geoCache[key];
   let res=null;
-  const g=await loadGoogle();
+  const g=addr?await loadGoogle():false;
   if(g){
     try{
       const geo=new google.maps.Geocoder();
@@ -173,7 +214,7 @@ async function geocodeOne(addr,city,cap,center){
         if(!center||km(p,center)<25)res={...p,prec:t.includes("street_address")||t.includes("premise")||t.includes("establishment")?"civico":t.includes("route")?"via":"zona"};}
     }catch(e){}
   }
-  if(!res){
+  if(!res&&addr){
     const sk=streetKey(addr), hn=((addr.match(/\s(\d+[A-Z]?)\s*$/i)||["",""])[1]).toLowerCase();
     try{
       const j=await photon(q,center);
@@ -186,7 +227,7 @@ async function geocodeOne(addr,city,cap,center){
       else if((f=feats.find(same)))res={lat:f.lat,lon:f.lon,prec:"via"};
     }catch(e){}
   }
-  if(!res){
+  if(!res&&addr){
     try{
       const j=await nominatim({street:addr,city,postalcode:cap||""});
       const f=j.find(x=>!center||km({lat:+x.lat,lon:+x.lon},center)<25);
@@ -197,6 +238,16 @@ async function geocodeOne(addr,city,cap,center){
     const street=addr.replace(/\s+\d+\s*[A-Z]?\s*$/i,"");
     if(street&&street!==addr){
       try{const j=await nominatim({street,city});const f=j.find(x=>!center||km({lat:+x.lat,lon:+x.lon},center)<25);if(f)res={lat:+f.lat,lon:+f.lon,prec:"via"}}catch(e){}
+    }
+  }
+  // indirizzo non trovato o solo la via: cerco l'attività per nome nella stessa città
+  if((!res||res.prec!=="civico")&&names&&names.length){
+    const hit=await findByName(names,city,center);
+    if(hit){
+      const sk=streetKey(addr),hs=streetKey(hit.street||hit.where||"");
+      const sameStreet=!!sk&&!!hs&&(sk===hs||sk.includes(hs)||hs.includes(sk));
+      if(sameStreet)res={lat:hit.lat,lon:hit.lon,prec:"civico",web:"Posizione trovata cercando \u00ab"+hit.name+"\u00bb: stessa via della lista"};
+      else if(!res)res={lat:hit.lat,lon:hit.lon,prec:"nome",web:"Indirizzo della lista non trovato. Trovata l'attivit\u00e0 \u00ab"+hit.name+"\u00bb in "+hit.where+", "+city+": verifica sul posto"};
     }
   }
   if(res){geoCache[key]=res;LS.set("geo",geoCache)}
@@ -288,7 +339,7 @@ function buildStops(clients){
   const stops=[];
   clients.forEach(c=>{
     let s=stops.find(s=>km(s,c)<0.025);
-    if(!s){s={lat:c.lat,lon:c.lon,prec:c.prec,addr:c.addrClean,acc:[]};stops.push(s)}
+    if(!s){s={lat:c.lat,lon:c.lon,prec:c.prec,addr:c.addrClean||c.addr,acc:[]};if(c.web)s.web=c.web;stops.push(s)}
     s.acc.push(c.id);
     if(c.prec==="civico")s.prec="civico";
   });
@@ -331,8 +382,9 @@ async function calculate(){
     const miss=[];
     for(let i=0;i<clients.length;i++){
       const c=clients[i];setP(i,clients.length,`Trovo gli indirizzi: ${i+1} di ${clients.length}`);
-      const g=c.addrClean?await geocodeOne(c.addrClean,c.city,c.cap,center):null;
-      if(g){c.lat=g.lat;c.lon=g.lon;c.prec=g.prec}else miss.push(c);
+      const names=[...new Set([c.ins,cleanName(c.rs)].map(x=>cleanName(x)).filter(Boolean))];
+      const g=c.addrClean?await geocodeOne(c.addrClean,c.city,c.cap,center,names):(names.length?await geocodeOne("",c.city,c.cap,center,names):null);
+      if(g){c.lat=g.lat;c.lon=g.lon;c.prec=g.prec;if(g.web)c.web=g.web}else miss.push(c);
     }
     setP(1,1,"Divido le zone e calcolo i percorsi…");await sleep(30);
     const ok=clients.filter(c=>c.lat!=null);
@@ -358,9 +410,9 @@ async function calculate(){
 async function fetchGeom(T,start,ret){
   const pts=[start,...T.stops];if(ret)pts.push(start);
   try{
-    const u="https://router.project-osrm.org/route/v1/driving/"+pts.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";")+"?overview=full&geometries=geojson";
+    const u="https://router.project-osrm.org/route/v1/driving/"+pts.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";")+"?overview=false";
     const r=await fetch(u);const j=await r.json();
-    if(j.code==="Ok"){T.geom=j.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);T.km=+(j.routes[0].distance/1000).toFixed(1);return true}
+    if(j.code==="Ok"){T.geom=1;T.km=+(j.routes[0].distance/1000).toFixed(1);return true}
   }catch(e){}
   T.geom=null;T.km=+(routeLen(start,T.stops,ret)*1.3).toFixed(1);return false;
 }
@@ -375,7 +427,7 @@ async function fetchGeoms(){
 function teamPayload(P,ti){
   const T=P.teams[ti];
   return {v:1,id:P.id,d:P.date,c:P.city,r:P.ret?1:0,m:[+P.meet.lat.toFixed(6),+P.meet.lon.toFixed(6),P.meet.name],
-    t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(6),+s.lon.toFixed(6),s.prec==="civico"?1:0,s.acc.map(id=>{const c=P.clients[id];return [c.id,c.src,c.rs,c.ins||"",c.piva||"",c.cat||"",c.addr,c.trend||""]})])]};
+    t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(6),+s.lon.toFixed(6),s.prec==="civico"?1:s.prec==="nome"?2:0,s.acc.map(id=>{const c=P.clients[id];return [c.id,c.src,c.rs,c.ins||"",c.piva||"",c.cat||"",c.addr,c.trend||""]}),s.web||""])]};
 }
 function shareUrl(P,ti){return location.origin+location.pathname+"#t="+LZString.compressToEncodedURIComponent(JSON.stringify(teamPayload(P,ti)))}
 function readHash(){
@@ -383,7 +435,7 @@ function readHash(){
   try{
     const o=JSON.parse(LZString.decompressFromEncodedURIComponent(m[1]));
     const clients={};
-    const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]?"civico":"via",acc:s[3].map(a=>{clients[a[0]]={id:a[0],src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
+    const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{clients[a[0]]={id:a[0],src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
     T.stops.forEach(s=>{s.addr=cleanAddr(clients[s.acc[0]].addr)});
     return {id:o.id,date:o.d,city:o.c,ret:!!o.r,meet:{lat:o.m[0],lon:o.m[1],name:o.m[2]},clients,teams:[T],shared:true};
   }catch(e){return {error:true}}
@@ -413,6 +465,11 @@ function gLegs(P,T){
     const lab=p=>p.n===0?"ritrovo":p.n==="R"?"rientro":"tappa "+p.n;
     legs.push({u,t:lab(seg[0])+" → "+lab(seg[seg.length-1])});
   }
+  // percorso intero: formato /maps/dir/punto/punto/... (Google Maps può tagliare oltre le ~10 fermate nell'app)
+  if(pts.length>2){
+    const all="https://www.google.com/maps/dir/"+pts.map(p=>p.lat.toFixed(6)+","+p.lon.toFixed(6)).join("/")+"/data=!4m2!4m1!3e0";
+    legs.unshift({u:all,t:"Percorso intero ("+T.stops.length+" tappe)",full:true});
+  }
   return legs;
 }
 
@@ -420,9 +477,9 @@ function gLegs(P,T){
 let MAP=null;
 const Leaf={
   init(){
-    this.m=L.map("map",{zoomControl:false,attributionControl:true}).setView([45.89,11.04],13);
+    this.m=L.map("map",{zoomControl:false,attributionControl:true,tapTolerance:20,bounceAtZoomLimits:false,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:90}).setView([45.89,11.04],13);
     L.control.zoom({position:"bottomright"}).addTo(this.m);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(this.m);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap",keepBuffer:4,updateWhenIdle:false,detectRetina:false}).addTo(this.m);
     this.layer=L.layerGroup().addTo(this.m);
     this.m.on("click",e=>MAP.onClick&&MAP.onClick({lat:e.latlng.lat,lon:e.latlng.lng}));
   },
@@ -467,8 +524,6 @@ function drawMap(){
   const teams=showAll?P.teams:[P.teams[curTeam]].filter(Boolean);
   const pts=[P.meet];
   teams.forEach(T=>{
-    if(T.geom)MAP.line(T.geom,T.color,false);
-    else{const c=[[P.meet.lat,P.meet.lon],...T.stops.map(s=>[s.lat,s.lon])];if(P.ret)c.push([P.meet.lat,P.meet.lon]);MAP.line(c,T.color,true)}
     T.stops.forEach((s,i)=>{
       const done=s.acc.every(id=>E[id]&&E[id].esito);
       const sel=selStop&&selStop.t===T.code&&selStop.i===i;
@@ -522,21 +577,22 @@ function renderPanel(){
   const T=P.teams[curTeam];if(!T){curTeam=0;return renderPanel()}
   const E=getE(P);
   const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
-  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b>${nDone}/${nAcc}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span></div>
+  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span></div>
   <div class="acts">
     <a class="btn small" href="${appleNav(P.meet,P.meet.name)}" target="_blank" rel="noopener">Naviga al ritrovo</a>
     <button class="btn small" id="b-wa">Riepilogo su WhatsApp</button>
     <label class="chk small"><input type="checkbox" id="s-walk" ${LS.get("walk",false)?"checked":""}> Naviga a piedi</label>
+    <label class="chk small"><input type="checkbox" id="s-hide" ${LS.get("hide",false)?"checked":""}> Nascondi visitati</label>
     ${P.shared?"":`<button class="btn small primary" id="b-share">Invia link alla coppia ${T.code}</button>`}
   </div>
   ${!P.shared&&P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b> non sono in nessuna coppia: li trovi in fondo alla pagina per posizionarli sulla mappa.</div>`:""}
   <div id="nextbox" class="next"></div>
-  <div class="legs small muted" style="margin-bottom:10px">Percorso intero su Google Maps: ${gLegs(P,T).map(l=>`<a class="btn small" href="${l.u}" target="_blank" rel="noopener">${esc(l.t)}</a>`).join("")}</div>`;
+  <div class="legs small muted" style="margin-bottom:10px"><div style="margin-bottom:6px">Percorso su Google Maps:</div>${gLegs(P,T).map(l=>`<a class="btn small${l.full?" primary":""}" href="${l.u}" target="_blank" rel="noopener">${esc(l.t)}</a>`).join("")}${T.stops.length>9?`<div class="small muted" style="margin-top:4px">Con più di 10 fermate l'app Google Maps può mostrare solo le prime: in quel caso usa gli spezzoni.</div>`:""}</div>`;
   T.stops.forEach((s,i)=>{
     const names=s.acc.map(id=>P.clients[id].ins||P.clients[id].rs).join(", ");
     const sel=selStop&&selStop.t===T.code&&selStop.i===i;
-    h+=`<article class="stop${sel?" sel":""}" id="st-${i}"><div class="hd"><div class="num" style="background:${T.color}">${i+1}</div><div><div class="addr">${esc(s.addr)}</div>
-      <div class="meta">${s.prec==="civico"?"":s.prec==="manuale"?"Posizione impostata a mano":`<span class="prec-${s.prec==="zona"?"zona":"via"}">Posizione indicativa sulla via: cerca il civico</span>`}</div></div></div>`;
+    h+=`<article class="stop${sel?" sel":""}${stopDone(E,s)?" done":""}" id="st-${i}"><div class="hd"><div class="num" style="background:${T.color}">${i+1}</div><div><div class="addr">${esc(s.addr)}</div>
+      <div class="meta">${s.prec==="nome"?`<span class="prec-zona">${esc(s.web)}</span>`:s.web?`<span class="prec-ok">${esc(s.web)}</span>`:s.prec==="civico"?"":s.prec==="manuale"?"Posizione impostata a mano":`<span class="prec-via">Posizione indicativa sulla via: cerca il civico</span>`}</div></div></div>`;
     s.acc.forEach(id=>{const c=P.clients[id],e=E[id]||{};
       h+=`<div class="acc"><div class="rs"><span class="tag ${esc(c.src)}">${esc(c.src)}</span>${esc(c.ins||c.rs)}</div>
         <div class="meta">${c.ins?esc(c.rs)+" · ":""}${c.piva?"P.IVA "+esc(c.piva)+" · ":""}${esc(c.cat||"")}${c.trend?" · "+esc(c.trend):""}</div>
@@ -551,10 +607,14 @@ function renderPanel(){
   }
   panel.innerHTML=h;
   renderNext();
-  panel.querySelectorAll(".esiti button").forEach(b=>b.onclick=()=>{const id=b.parentNode.dataset.id;const cur=(getE(P)[id]||{}).esito;setE(P,id,{esito:cur===b.dataset.e?"":b.dataset.e});renderPanel();drawMap()});
+  panel.querySelectorAll(".esiti").forEach(row=>row.onclick=ev=>{const b=ev.target.closest("button");if(!b)return;const id=row.dataset.id;const cur=(getE(P)[id]||{}).esito;const val=cur===b.dataset.e?"":b.dataset.e;setE(P,id,{esito:val});
+    row.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.e===val));
+    if(navigator.vibrate)navigator.vibrate(10);
+    refreshProgress(P,T);});
   panel.querySelectorAll("input.note").forEach(n=>n.onchange=()=>{setE(P,n.dataset.id,{nota:n.value.trim()})});
   panel.querySelectorAll("[data-map]").forEach(b=>b.onclick=()=>selectStop(curTeam,+b.dataset.map,true));
   $("#s-walk").onchange=e=>{LS.set("walk",e.target.checked);renderPanel()};
+  $("#s-hide").onchange=e=>{LS.set("hide",e.target.checked);applyHide(P,T)};applyHide(P,T);
   $("#b-wa").onclick=()=>{const txt=summary(P,T);window.open("https://wa.me/?text="+encodeURIComponent(txt),"_blank")};
   if(!P.shared){
     $("#b-share").onclick=()=>shareSheet(P,curTeam);
@@ -575,11 +635,21 @@ function renderAll(P,panel){
   $("#b-recalc").onclick=()=>{const ids=P.teams.flatMap(T=>T.stops);const k=Math.min(settings.k,ids.length);P.teams=makeTeams(ids,k,P.meet,P.ret);savePlan();drawMap.refit=true;fetchGeoms();renderPairbar();toast("Zone ricalcolate")};
   $("#b-meetmove").onclick=()=>{moveMode={kind:"meet"};expandMap(true);toast("Tocca sulla mappa il nuovo punto di ritrovo",4000)};
 }
+function stopDone(E,s){return s.acc.every(id=>E[id]&&E[id].esito)}
+function refreshProgress(P,T){
+  const E=getE(P);const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
+  const c=$("#cnt-done");if(c)c.textContent=nDone+"/"+nAcc;
+  T.stops.forEach((s,i)=>{const el=$("#st-"+i);if(el)el.classList.toggle("done",stopDone(E,s))});
+  renderNext();drawMap();
+}
+function applyHide(P,T){const on=LS.get("hide",false);document.body.classList.toggle("hide-done",on)}
 function savePlan(){if(plan)LS.set("plan",plan)}
 function selectStop(ti,i,scroll){
-  const P=current();if(curTeam!==ti&&!(P.shared)){curTeam=ti;renderPairbar()}
+  const P=current();let changed=false;if(curTeam!==ti&&!(P.shared)){curTeam=ti;changed=true;renderPairbar()}
   const T=P.teams[ti];selStop={t:T.code,i};
-  drawMap();renderPanel();MAP.pan(T.stops[i],16);
+  drawMap();
+  if(!changed&&$("#st-"+i)){document.querySelectorAll(".stop.sel").forEach(x=>x.classList.remove("sel"));$("#st-"+i).classList.add("sel")}else renderPanel();
+  MAP.pan(T.stops[i],16);
   if(scroll){const el=$("#st-"+i);if(el)el.scrollIntoView({behavior:"smooth",block:"center"})}
 }
 function shareSheet(P,ti){
@@ -596,7 +666,7 @@ function shareSheet(P,ti){
   $("#sh-copy").onclick=async()=>{try{await navigator.clipboard.writeText(url);toast("Link copiato")}catch(e){prompt("Copia il link:",url)}};
   if(navigator.share)$("#sh-native").onclick=()=>navigator.share({title:"Canvassing coppia "+T.code,text:msg.split("\n")[0],url}).catch(()=>{});
 }
-function expandMap(on){$("#mapwrap").classList.toggle("full",on);MAP&&MAP.resize()}
+function expandMap(on){const w=$("#mapwrap");w.classList.toggle("full",on);MAP&&MAP.resize();setTimeout(()=>MAP&&MAP.resize(),320)}
 
 function onMapClick(p){
   if(!moveMode)return;
@@ -655,5 +725,7 @@ function boot(){
   go(plan&&LS.get("page","liste")==="mappa"?"mappa":"liste");
 }
 window.addEventListener("hashchange",()=>location.reload());
-boot();
+function setHH(){document.documentElement.style.setProperty("--hh",$("#top").offsetHeight+"px")}
+window.addEventListener("resize",setHH);
+boot();setHH();
 })();

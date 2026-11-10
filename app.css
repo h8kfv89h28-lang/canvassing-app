@@ -7,8 +7,8 @@
   :root{ --bg:#0e141b; --card:#18212c; --ink:#e8eef5; --muted:#9aa8b8; --line:#2a3644; --brand:#0b2d5b; --sh:none; }
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%}
-body{background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+html,body{margin:0;min-height:100%}
+body{-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
 button,input,select{font:inherit;color:inherit}
 header{position:sticky;top:0;z-index:1000;background:var(--brand);color:#fff;padding:calc(env(safe-area-inset-top) + 8px) 12px 0}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;padding-bottom:6px}
@@ -54,7 +54,7 @@ details summary{font-weight:700;cursor:pointer}
 
 /* mappa */
 #mapwrap{position:relative;height:46vh;min-height:260px;background:#dfe5ea}
-#mapwrap.full{height:calc(100vh - 92px - env(safe-area-inset-top))}
+#mapwrap.full{height:calc(100vh - var(--hh,92px));height:calc(100dvh - var(--hh,92px))}
 #map{position:absolute;inset:0}
 .mapbtns{position:absolute;right:10px;top:10px;z-index:900;display:flex;flex-direction:column;gap:8px}
 .mbtn{width:42px;height:42px;border-radius:21px;border:0;background:#fff;color:#0b2d5b;font-size:21px;box-shadow:0 2px 8px rgba(0,0,0,.25)}
@@ -67,7 +67,7 @@ details summary{font-weight:700;cursor:pointer}
 .me{width:18px;height:18px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 6px rgba(26,115,232,.25)}
 .leaflet-div-icon{background:none;border:0}
 
-.pairbar{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:calc(84px + env(safe-area-inset-top));z-index:800}
+.pairbar{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:var(--hh,84px);z-index:800}
 .pairbar button{flex:0 0 auto;border:2px solid var(--c,#999);background:transparent;color:var(--ink);border-radius:20px;padding:6px 12px;font-weight:700;font-size:14px}
 .pairbar button.on{background:var(--c);color:#fff}
 #panel{padding:10px 12px calc(30px + env(safe-area-inset-bottom))}
@@ -90,8 +90,8 @@ details summary{font-weight:700;cursor:pointer}
 .esiti{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .esiti button{border:1px solid var(--line);background:var(--bg);border-radius:16px;padding:5px 10px;font-size:13px;font-weight:600}
 .esiti button.on{background:var(--brand);border-color:var(--brand);color:#fff}
-.esiti button.on[data-e="interessato"],.esiti button.on[data-e="tessera"]{background:var(--ok);border-color:var(--ok)}
-.esiti button.on[data-e="no"]{background:var(--ko);border-color:var(--ko)}
+.esiti button.on[data-e="Interessato"],.esiti button.on[data-e="Tessera / ordine fatto"]{background:var(--ok);border-color:var(--ok)}
+.esiti button.on[data-e="Non interessato"],.esiti button.on[data-e="Chiuso / cessato"]{background:var(--ko);border-color:var(--ko)}
 .note{width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:15px;color:var(--ink)}
 .stop .ft{display:flex;gap:8px;padding:8px 12px 12px;flex-wrap:wrap}
 .nav{background:#1a73e8;border-color:#1a73e8;color:#fff}
@@ -106,3 +106,24 @@ details summary{font-weight:700;cursor:pointer}
 .empty{text-align:center;padding:30px 16px;color:var(--muted)}
 table.cl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 table.cl td{border-top:1px solid var(--line);padding:5px 4px;vertical-align:top}
+
+/* fluidità */
+button,a,.btn,select,label{touch-action:manipulation}
+.btn,.esiti button,.pairbar button,.mbtn{transition:transform .08s ease,background-color .15s ease,color .15s ease,border-color .15s ease}
+.btn:active,.esiti button:active,.pairbar button:active,.mbtn:active{transform:scale(.96)}
+html{scroll-behavior:smooth}
+#mapwrap{transition:height .28s ease}
+.stop{content-visibility:auto;contain-intrinsic-size:auto 230px;transition:opacity .2s ease,box-shadow .2s ease,border-color .2s ease}
+.stop.done{opacity:.75}
+.stop.done .hd .num{filter:grayscale(.6)}
+body.hide-done .stop.done{display:none}
+.esiti{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-right:-12px;padding-right:12px}
+.esiti::-webkit-scrollbar{display:none}
+.esiti button{flex:0 0 auto;min-height:36px}
+.pairbar{scrollbar-width:none}.pairbar::-webkit-scrollbar{display:none}
+.tabs{scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.prec-ok{color:var(--ok)}
+.leaflet-marker-icon .pin{transition:transform .15s ease,opacity .2s ease}
+.leaflet-fade-anim .leaflet-tile{will-change:opacity}
+.sheet{animation:fadein .15s ease}.sheet-in{animation:slideup .22s ease}
+@keyframes fadein{from{opacity:0}}@keyframes slideup{from{transform:translateY(40px);opacity:.4}}
