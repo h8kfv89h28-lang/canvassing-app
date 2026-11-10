@@ -393,14 +393,14 @@ async function calculate(){
     const k=Math.min(settings.k,stops.length);
     const teams=makeTeams(stops,k,meet,settings.ret);
     const byId={};clients.forEach(c=>{byId[c.id]=c});
-    plan={id:uid(),date:new Date().toISOString().slice(0,10),city:settings.city,ret:settings.ret,meet,clients:byId,teams,missing:miss.map(c=>c.id)};
+    plan={sync:settings.sync||"",id:uid(),date:new Date().toISOString().slice(0,10),city:settings.city,ret:settings.ret,meet,clients:byId,teams,missing:miss.map(c=>c.id)};
     LS.set("plan",plan)||toast("Memoria piena: il piano non è stato salvato");
     pr.classList.add("hidden");
     msg.innerHTML+=`<div class="msg ok">Fatto: ${ok.length} clienti in ${stops.length} tappe, divisi in ${k} coppie.</div>`+
       (dups.length?`<div class="msg warn"><b>${dups.length} righe doppie</b> (stesso nome e indirizzo), contate una volta sola:<br>${dups.map(esc).join("<br>")}</div>`:"")+
       (miss.length?`<div class="msg warn"><b>${miss.length} indirizzi non trovati</b> (li trovi in fondo alla mappa, puoi posizionarli a mano):<br>${miss.map(c=>esc(c.rs+" – "+c.addr)).join("<br>")}</div>`:"");
     curTeam=0;selStop=null;
-    fetchGeoms();
+    fetchGeoms();startSync();
     setTimeout(()=>go("mappa"),miss.length?1800:600);
   }catch(e){pr.classList.add("hidden");msg.innerHTML=`<div class="msg err">${esc(e.message)}</div>`}
   btn.disabled=false;
@@ -426,7 +426,7 @@ async function fetchGeoms(){
 /* ---------- condivisione ---------- */
 function teamPayload(P,ti){
   const T=P.teams[ti];
-  return {v:1,id:P.id,d:P.date,c:P.city,r:P.ret?1:0,m:[+P.meet.lat.toFixed(6),+P.meet.lon.toFixed(6),P.meet.name],
+  return {v:1,s:P.sync||"",id:P.id,d:P.date,c:P.city,r:P.ret?1:0,m:[+P.meet.lat.toFixed(6),+P.meet.lon.toFixed(6),P.meet.name],
     t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(6),+s.lon.toFixed(6),s.prec==="civico"?1:s.prec==="nome"?2:0,s.acc.map(id=>{const c=P.clients[id];return [c.id,c.src,c.rs,c.ins||"",c.piva||"",c.cat||"",c.addr,c.trend||""]}),s.web||""])]};
 }
 function shareUrl(P,ti){return location.origin+location.pathname+"#t="+LZString.compressToEncodedURIComponent(JSON.stringify(teamPayload(P,ti)))}
@@ -437,15 +437,71 @@ function readHash(){
     const clients={};
     const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{clients[a[0]]={id:a[0],src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
     T.stops.forEach(s=>{s.addr=cleanAddr(clients[s.acc[0]].addr)});
-    return {id:o.id,date:o.d,city:o.c,ret:!!o.r,meet:{lat:o.m[0],lon:o.m[1],name:o.m[2]},clients,teams:[T],shared:true};
+    return {sync:o.s||"",id:o.id,date:o.d,city:o.c,ret:!!o.r,meet:{lat:o.m[0],lon:o.m[1],name:o.m[2]},clients,teams:[T],shared:true};
   }catch(e){return {error:true}}
 }
 function current(){return shared||plan}
 
 /* ---------- esiti (per telefono) ---------- */
 function eKey(P){return "esiti:"+P.id}
-function getE(P){return LS.get(eKey(P),{})}
-function setE(P,id,patch){const all=getE(P);all[id]=Object.assign(all[id]||{},patch,{at:new Date().toTimeString().slice(0,5)});if(!all[id].esito&&!all[id].nota)delete all[id];LS.set(eKey(P),all)}
+function getE(P){
+  const loc=LS.get(eKey(P),{}),rem=LS.get("remote:"+P.id,{});
+  const out=Object.assign({},loc);
+  for(const id in rem){const r=rem[id];if(!out[id]||(r.ts||0)>(out[id].ts||0)){if(r.esito||r.nota)out[id]=r;else delete out[id]}}
+  return out;
+}
+function setE(P,id,patch){
+  const all=LS.get(eKey(P),{});
+  all[id]=Object.assign(all[id]||{},patch,{at:new Date().toTimeString().slice(0,5),ts:Date.now()});
+  const e=all[id];LS.set(eKey(P),all);
+  if(P.sync)queueSync(P,id,e);
+}
+/* ---------- sincronizzazione con Foglio Google ---------- */
+const DEV=LS.get("dev",null)||(()=>{const d=/iPhone/.test(navigator.userAgent)?"iPhone-"+uid().slice(-4):"tel-"+uid().slice(-4);LS.set("dev",d);return d})();
+function teamOf(P,id){const T=P.teams.find(T=>T.stops.some(s=>s.acc.includes(id)));return T?T.code:""}
+function queueSync(P,id,e){
+  const c=P.clients[id]||{};
+  const q=LS.get("q",[]).filter(x=>!(x.plan===P.id&&x.id===id));
+  q.push({url:P.sync,plan:P.id,date:P.date,team:teamOf(P,id),id,rs:c.rs,ins:c.ins,addr:c.addr,src:c.src,esito:e.esito||"",nota:e.nota||"",at:e.at,ts:e.ts,dev:DEV});
+  LS.set("q",q);flushSync();
+}
+let flushing=false;
+async function flushSync(){
+  if(flushing)return;const q=LS.get("q",[]);if(!q.length){syncState("ok");return}
+  flushing=true;
+  const byUrl={};q.forEach(x=>{(byUrl[x.url]=byUrl[x.url]||[]).push(x)});
+  let left=[];
+  for(const url in byUrl){
+    try{await fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(byUrl[url].map(({url,...r})=>r))})}
+    catch(e){left=left.concat(byUrl[url])}
+  }
+  const now=LS.get("q",[]);const sent=new Set(q.filter(x=>!left.includes(x)).map(x=>x.plan+"|"+x.id+"|"+x.ts));
+  LS.set("q",now.filter(x=>!sent.has(x.plan+"|"+x.id+"|"+x.ts)));
+  flushing=false;syncState(left.length?"off":"ok");
+}
+let lastPull=null;
+async function pullSync(){
+  const P=current();if(!P||!P.sync)return;
+  try{
+    const u=P.sync+(P.sync.includes("?")?"&":"?")+"plan="+encodeURIComponent(P.id)+(P.shared?"&team="+encodeURIComponent(P.teams[0].code):"");
+    const r=await fetch(u);const j=await r.json();if(!j||!j.rows)throw 0;
+    const rem={};j.rows.forEach(x=>{rem[x.id]={esito:x.esito,nota:x.nota,at:x.at,ts:x.ts,team:x.team}});
+    const before=JSON.stringify(LS.get("remote:"+P.id,{}));LS.set("remote:"+P.id,rem);
+    lastPull=new Date().toTimeString().slice(0,5);syncState("ok");
+    if(before!==JSON.stringify(rem)&&!document.activeElement.classList.contains("note")){drawMap();renderPanel()}
+    else{const el=$("#sync-at");if(el)el.textContent=lastPull}
+  }catch(e){syncState("off")}
+}
+function syncState(st){const el=$("#sync-dot");if(el){el.className="sync "+st;el.title=st==="ok"?"Esiti sincronizzati":"In attesa di connessione"}}
+let syncStarted=false;
+function startSync(){
+  if(!current()||!current().sync)return;
+  flushSync();pullSync();
+  if(syncStarted)return;syncStarted=true;
+  setInterval(()=>{if(!document.hidden){flushSync();pullSync()}},30000);
+  window.addEventListener("online",()=>{flushSync();pullSync()});
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden){flushSync();pullSync()}});
+}
 function summary(P,T){
   const E=getE(P);let done=[],todo=[];
   T.stops.forEach((s,i)=>s.acc.forEach(id=>{const c=P.clients[id],e=E[id];const line=`${i+1}. ${c.rs}${c.ins?" ("+c.ins+")":""} – ${c.addr}`;if(e&&e.esito)done.push(line+` → ${e.esito}${e.nota?" · "+e.nota:""} [${e.at}]`);else todo.push(line+(e&&e.nota?" · "+e.nota:""))}));
@@ -577,7 +633,7 @@ function renderPanel(){
   const T=P.teams[curTeam];if(!T){curTeam=0;return renderPanel()}
   const E=getE(P);
   const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
-  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span></div>
+  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>Esiti condivisi${lastPull?` · <span id="sync-at">${lastPull}</span>`:""}</span>`:""}</div>
   <div class="acts">
     <a class="btn small" href="${appleNav(P.meet,P.meet.name)}" target="_blank" rel="noopener">Naviga al ritrovo</a>
     <button class="btn small" id="b-wa">Riepilogo su WhatsApp</button>
@@ -698,12 +754,21 @@ async function go(pg){
 
 /* ---------- avvio ---------- */
 function initSettingsUI(){
-  $("#s-city").value=settings.city;$("#s-k").value=settings.k;$("#s-meet").value=settings.meet;$("#s-ret").checked=settings.ret;$("#s-gkey").value=settings.gkey||"";
+  $("#s-city").value=settings.city;$("#s-k").value=settings.k;$("#s-meet").value=settings.meet;$("#s-ret").checked=settings.ret;$("#s-gkey").value=settings.gkey||"";$("#s-sync").value=settings.sync||"";
   ["#s-city","#s-k","#s-meet","#s-ret"].forEach(s=>$(s).onchange=()=>{settings.city=$("#s-city").value.trim();settings.k=+$("#s-k").value;settings.meet=$("#s-meet").value.trim();settings.ret=$("#s-ret").checked;LS.set("settings",settings)});
   $("#file").onchange=e=>{onFiles([...e.target.files]);e.target.value=""};
   $("#b-calc").onclick=calculate;
   $("#b-meet-gps").onclick=()=>{navigator.geolocation&&navigator.geolocation.getCurrentPosition(p=>{settings.meetGps={lat:p.coords.latitude,lon:p.coords.longitude,name:"Ritrovo (posizione GPS)"};settings.meet="La mia posizione";$("#s-meet").value=settings.meet;LS.set("settings",settings);$("#meet-info").textContent="Ritrovo impostato sulla tua posizione attuale."},()=>toast("Posizione non disponibile"),{enableHighAccuracy:true,timeout:15000})};
   $("#b-gkey").onclick=()=>{settings.gkey=$("#s-gkey").value.trim();LS.set("settings",settings);toast("Chiave salvata: ricarico l'app");setTimeout(()=>location.reload(),900)};
+  $("#b-sync").onclick=async()=>{
+    const v=$("#s-sync").value.trim();
+    if(v&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(v)){toast("Il link deve iniziare con https://script.google.com/macros/s/ e finire con /exec",5000);return}
+    settings.sync=v;LS.set("settings",settings);
+    if(plan){plan.sync=v;savePlan()}
+    if(!v){toast("Sincronizzazione disattivata");return}
+    try{const r=await fetch(v);const j=await r.json();toast(j&&j.ok?"Collegamento al foglio riuscito. Rimanda i link alle coppie.":"Il foglio non risponde come previsto",5000)}catch(e){toast("Non riesco a raggiungere il foglio: controlla che il deployment sia per \"Chiunque\"",6000)}
+    startSync();
+  };
   $("#b-gkey-del").onclick=()=>{settings.gkey="";$("#s-gkey").value="";LS.set("settings",settings);setTimeout(()=>location.reload(),300)};
   $("#b-reset").onclick=()=>{if(!confirm("Cancello liste, percorsi ed esiti salvati su questo telefono?"))return;["files","plan","geo"].forEach(LS.del);try{Object.keys(localStorage).filter(k=>k.startsWith("cv:esiti:")).forEach(k=>localStorage.removeItem(k))}catch(e){}location.reload()};
 }
@@ -718,7 +783,7 @@ function boot(){
     const T=shared.teams[0];
     $("#title").textContent=`Coppia ${T.code} · ${shared.city} ${shared.date.split("-").reverse().join("/")}`;
     $("#top").style.background=T.color;
-    curTeam=0;go("mappa");startGps(false);
+    curTeam=0;go("mappa");startGps(false);startSync();
     return;
   }
   initSettingsUI();renderFiles();
@@ -727,5 +792,5 @@ function boot(){
 window.addEventListener("hashchange",()=>location.reload());
 function setHH(){document.documentElement.style.setProperty("--hh",$("#top").offsetHeight+"px")}
 window.addEventListener("resize",setHH);
-boot();setHH();
+boot();setHH();if(!shared)startSync();
 })();

@@ -24,7 +24,7 @@ main{max-width:760px;margin:0 auto}
 .card h2{font-size:17px;margin:0 0 6px}
 .muted{color:var(--muted)} .small{font-size:13px}
 label{display:block;font-size:13px;color:var(--muted);margin:8px 0 0}
-label input[type=text],label select{display:block;width:100%;margin-top:4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:16px;color:var(--ink)}
+label input[type=text],label input[type=url],label select{display:block;width:100%;margin-top:4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:16px;color:var(--ink)}
 .grid2{display:grid;grid-template-columns:2fr 1fr;gap:10px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
 .chk{display:flex;align-items:center;gap:6px;margin:0;font-size:14px;color:var(--ink)}
@@ -127,3 +127,6 @@ body.hide-done .stop.done{display:none}
 .leaflet-fade-anim .leaflet-tile{will-change:opacity}
 .sheet{animation:fadein .15s ease}.sheet-in{animation:slideup .22s ease}
 @keyframes fadein{from{opacity:0}}@keyframes slideup{from{transform:translateY(40px);opacity:.4}}
+.sub{font-size:14px;margin:14px 0 2px}
+.sync{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0;background:var(--ok)}
+.sync.off{background:var(--warn)}
