@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="app.css?v=3">
+<link rel="stylesheet" href="app.css?v=4">
 </head>
 <body>
 <header id="top">
@@ -59,7 +59,8 @@
         <h3 class="sub">Esiti in tempo reale</h3>
         <p class="muted small">Incolla il link dell'app web del tuo Foglio Google (finisce con <b>/exec</b>). Gli esiti segnati dalle coppie arrivano nel foglio e nella tua mappa. Funziona per i percorsi calcolati e i link inviati dopo averlo salvato.</p>
         <label>Link Foglio Google<input id="s-sync" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></label>
-        <div class="row"><button id="b-sync" class="btn small">Salva e prova il collegamento</button></div>
+        <div class="row"><button id="b-sync" class="btn small">Salva e prova il collegamento</button><a class="btn small ghost" href="setup.html">Come ottengo il link?</a></div>
+        <div id="sheet-link" class="row"></div>
         <hr>
         <h3 class="sub">Mappa</h3>
         <p class="muted small">Di base l'app usa la mappa gratuita OpenStreetMap. Se hai una chiave API di Google Maps (Maps JavaScript API + Geocoding API), incollala qui: viene salvata solo su questo telefono.</p>
@@ -91,6 +92,6 @@
 
 <script src="vendor/leaflet.js"></script>
 <script src="vendor/lz-string.min.js"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

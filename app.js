@@ -457,6 +457,7 @@ function setE(P,id,patch){
   if(P.sync)queueSync(P,id,e);
 }
 /* ---------- sincronizzazione con Foglio Google ---------- */
+function renderSheetLink(){const el=$("#sheet-link");if(!el)return;el.innerHTML=settings.sheetUrl?`<a class="btn small" href="${esc(settings.sheetUrl)}" target="_blank" rel="noopener">Apri il foglio degli esiti</a>`:""}
 const DEV=LS.get("dev",null)||(()=>{const d=/iPhone/.test(navigator.userAgent)?"iPhone-"+uid().slice(-4):"tel-"+uid().slice(-4);LS.set("dev",d);return d})();
 function teamOf(P,id){const T=P.teams.find(T=>T.stops.some(s=>s.acc.includes(id)));return T?T.code:""}
 function queueSync(P,id,e){
@@ -639,6 +640,7 @@ function renderPanel(){
     <button class="btn small" id="b-wa">Riepilogo su WhatsApp</button>
     <label class="chk small"><input type="checkbox" id="s-walk" ${LS.get("walk",false)?"checked":""}> Naviga a piedi</label>
     <label class="chk small"><input type="checkbox" id="s-hide" ${LS.get("hide",false)?"checked":""}> Nascondi visitati</label>
+    ${!P.shared&&P.sync&&settings.sheetUrl?`<a class="btn small" href="${esc(settings.sheetUrl)}" target="_blank" rel="noopener">Foglio esiti</a>`:""}
     ${P.shared?"":`<button class="btn small primary" id="b-share">Invia link alla coppia ${T.code}</button>`}
   </div>
   ${!P.shared&&P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b> non sono in nessuna coppia: li trovi in fondo alla pagina per posizionarli sulla mappa.</div>`:""}
@@ -754,7 +756,7 @@ async function go(pg){
 
 /* ---------- avvio ---------- */
 function initSettingsUI(){
-  $("#s-city").value=settings.city;$("#s-k").value=settings.k;$("#s-meet").value=settings.meet;$("#s-ret").checked=settings.ret;$("#s-gkey").value=settings.gkey||"";$("#s-sync").value=settings.sync||"";
+  $("#s-city").value=settings.city;$("#s-k").value=settings.k;$("#s-meet").value=settings.meet;$("#s-ret").checked=settings.ret;$("#s-gkey").value=settings.gkey||"";$("#s-sync").value=settings.sync||"";renderSheetLink();if(location.hash==="#impostazioni"){$("details").open=true;setTimeout(()=>$("#s-sync").scrollIntoView({block:"center"}),200)}
   ["#s-city","#s-k","#s-meet","#s-ret"].forEach(s=>$(s).onchange=()=>{settings.city=$("#s-city").value.trim();settings.k=+$("#s-k").value;settings.meet=$("#s-meet").value.trim();settings.ret=$("#s-ret").checked;LS.set("settings",settings)});
   $("#file").onchange=e=>{onFiles([...e.target.files]);e.target.value=""};
   $("#b-calc").onclick=calculate;
@@ -766,7 +768,7 @@ function initSettingsUI(){
     settings.sync=v;LS.set("settings",settings);
     if(plan){plan.sync=v;savePlan()}
     if(!v){toast("Sincronizzazione disattivata");return}
-    try{const r=await fetch(v);const j=await r.json();toast(j&&j.ok?"Collegamento al foglio riuscito. Rimanda i link alle coppie.":"Il foglio non risponde come previsto",5000)}catch(e){toast("Non riesco a raggiungere il foglio: controlla che il deployment sia per \"Chiunque\"",6000)}
+    try{const r=await fetch(v);const j=await r.json();if(j&&j.sheet){settings.sheetUrl=j.sheet;LS.set("settings",settings);renderSheetLink()}toast(j&&j.ok?"Collegamento al foglio riuscito. Rimanda i link alle coppie.":"Il foglio non risponde come previsto",5000)}catch(e){toast("Non riesco a raggiungere il foglio: controlla che il deployment sia per \"Chiunque\"",6000)}
     startSync();
   };
   $("#b-gkey-del").onclick=()=>{settings.gkey="";$("#s-gkey").value="";LS.set("settings",settings);setTimeout(()=>location.reload(),300)};
@@ -787,7 +789,7 @@ function boot(){
     return;
   }
   initSettingsUI();renderFiles();
-  go(plan&&LS.get("page","liste")==="mappa"?"mappa":"liste");
+  go(location.hash!=="#impostazioni"&&plan&&LS.get("page","liste")==="mappa"?"mappa":"liste");
 }
 window.addEventListener("hashchange",()=>location.reload());
 function setHH(){document.documentElement.style.setProperty("--hh",$("#top").offsetHeight+"px")}
