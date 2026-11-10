@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Canvassing">
+<meta name="theme-color" content="#0b2d5b">
+<title>Canvassing</title>
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><span class="logo">C</span><span id="title">Canvassing</span></div>
+  <nav id="tabs" class="tabs"></nav>
+</header>
+
+<main>
+  <!-- Pagina liste (solo responsabile) -->
+  <section id="pg-liste" class="page">
+    <div class="card">
+      <h2>1. Carica le liste clienti</h2>
+      <p class="muted">File Excel (.xlsx, .xls) o CSV. Servono almeno le colonne <b>Ragione Sociale</b> (o Insegna) e <b>Indirizzo</b>. I file restano su questo telefono: non vengono caricati su nessun server.</p>
+      <label class="btn primary file"><input id="file" type="file" accept=".xlsx,.xls,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" multiple>Scegli file Excel</label>
+      <div id="files"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Giornata</h2>
+      <div class="grid2">
+        <label>Comune<input id="s-city" type="text" placeholder="es. Rovereto"></label>
+        <label>Coppie<select id="s-k"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></label>
+      </div>
+      <label>Punto di ritrovo<input id="s-meet" type="text" placeholder="es. Parcheggio Mart, Via Sticcotta"></label>
+      <div class="row">
+        <button id="b-meet-gps" class="btn small">Usa la mia posizione</button>
+        <label class="chk"><input id="s-ret" type="checkbox" checked> Rientro al ritrovo a fine giro</label>
+      </div>
+      <p id="meet-info" class="muted small"></p>
+    </div>
+
+    <div class="card">
+      <h2>3. Calcola i percorsi</h2>
+      <p class="muted">Trovo la posizione di ogni indirizzo, divido i clienti tra le coppie in zone compatte e calcolo l'ordine di visita più corto.</p>
+      <button id="b-calc" class="btn primary big" disabled>Calcola percorsi</button>
+      <div id="progress" class="progress hidden"><div class="bar"><i></i></div><span></span></div>
+      <div id="calc-msg"></div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Impostazioni mappa</summary>
+        <p class="muted small">Di base l'app usa la mappa gratuita OpenStreetMap. Se hai una chiave API di Google Maps (Maps JavaScript API + Geocoding API), incollala qui: viene salvata solo su questo telefono.</p>
+        <label>Chiave Google Maps (facoltativa)<input id="s-gkey" type="text" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
+        <div class="row"><button id="b-gkey" class="btn small">Salva chiave</button><button id="b-gkey-del" class="btn small ghost">Torna a OpenStreetMap</button></div>
+        <hr>
+        <button id="b-reset" class="btn small danger">Cancella liste e percorsi da questo telefono</button>
+      </details>
+    </div>
+  </section>
+
+  <!-- Pagina mappa / itinerario -->
+  <section id="pg-mappa" class="page hidden">
+    <div id="mapwrap">
+      <div id="map"></div>
+      <div class="mapbtns">
+        <button id="b-locate" class="mbtn" title="La mia posizione" aria-label="La mia posizione">◎</button>
+        <button id="b-expand" class="mbtn" title="Ingrandisci mappa" aria-label="Ingrandisci mappa">⤢</button>
+      </div>
+      <div id="mapnote" class="mapnote"></div>
+    </div>
+    <div id="pairbar" class="pairbar"></div>
+    <div id="panel"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<div id="sheet" class="sheet hidden"><div class="sheet-in"></div></div>
+
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/lz-string.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
