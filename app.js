@@ -322,10 +322,10 @@ async function calculate(){
     else if(settings.meet){setP(0,1,"Cerco il punto di ritrovo…");const p=await geocodePlace(settings.meet,settings.city,center);if(p)meet={...p,name:settings.meet}}
     if(!meet){meet={...center,name:"Centro di "+settings.city};msg.innerHTML+=`<div class="msg warn">Punto di ritrovo non trovato: uso il centro di ${esc(settings.city)}. Puoi spostarlo dalla mappa.</div>`}
     // clienti
-    const clients=[];const seen=new Set();
+    const clients=[];const seen=new Set();const dups=[];
     files.forEach(f=>f.rows.forEach((r,i)=>{
       const ac=cleanAddr(r.addr);const city=r.city||settings.city;
-      const dk=(r.rs+"|"+ac).toLowerCase();if(seen.has(dk))return;seen.add(dk);
+      const dk=(r.rs+"|"+ac).toLowerCase();if(seen.has(dk)){dups.push(r.rs+" – "+r.addr+" ("+f.label+")");return}seen.add(dk);
       clients.push({id:f.label+"-"+(r.cid||i+1),src:f.label,rs:r.rs,ins:r.ins,piva:r.piva,cat:r.cat,addr:r.addr,addrClean:ac,city,cap:r.cap,trend:r.trend});
     }));
     const miss=[];
@@ -345,6 +345,7 @@ async function calculate(){
     LS.set("plan",plan)||toast("Memoria piena: il piano non è stato salvato");
     pr.classList.add("hidden");
     msg.innerHTML+=`<div class="msg ok">Fatto: ${ok.length} clienti in ${stops.length} tappe, divisi in ${k} coppie.</div>`+
+      (dups.length?`<div class="msg warn"><b>${dups.length} righe doppie</b> (stesso nome e indirizzo), contate una volta sola:<br>${dups.map(esc).join("<br>")}</div>`:"")+
       (miss.length?`<div class="msg warn"><b>${miss.length} indirizzi non trovati</b> (li trovi in fondo alla mappa, puoi posizionarli a mano):<br>${miss.map(c=>esc(c.rs+" – "+c.addr)).join("<br>")}</div>`:"");
     curTeam=0;selStop=null;
     fetchGeoms();
@@ -528,6 +529,7 @@ function renderPanel(){
     <label class="chk small"><input type="checkbox" id="s-walk" ${LS.get("walk",false)?"checked":""}> Naviga a piedi</label>
     ${P.shared?"":`<button class="btn small primary" id="b-share">Invia link alla coppia ${T.code}</button>`}
   </div>
+  ${!P.shared&&P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b> non sono in nessuna coppia: li trovi in fondo alla pagina per posizionarli sulla mappa.</div>`:""}
   <div id="nextbox" class="next"></div>
   <div class="legs small muted" style="margin-bottom:10px">Percorso intero su Google Maps: ${gLegs(P,T).map(l=>`<a class="btn small" href="${l.u}" target="_blank" rel="noopener">${esc(l.t)}</a>`).join("")}</div>`;
   T.stops.forEach((s,i)=>{
@@ -562,7 +564,7 @@ function renderPanel(){
   }
 }
 function renderAll(P,panel){
-  let h=`<div class="sum"><span>Ritrovo: <b>${esc(P.meet.name)}</b></span><span>${P.date}</span></div>`;
+  let h=`<div class="sum"><span>Ritrovo: <b>${esc(P.meet.name)}</b></span><span>${P.date}</span></div>`+(P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b>: apri una coppia e scorri in fondo per posizionarli.</div>`:"");
   P.teams.forEach((T,i)=>{const n=T.stops.reduce((s,x)=>s+x.acc.length,0);
     h+=`<div class="card"><h2 style="color:${T.color}">Coppia ${T.code}</h2><div class="sum"><span><b>${n}</b> clienti</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km</span></div>
       <div class="row"><button class="btn small primary" data-sh="${i}">Invia link</button><button class="btn small" data-open="${i}">Apri</button></div></div>`});
