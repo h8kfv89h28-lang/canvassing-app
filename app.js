@@ -429,11 +429,15 @@ function teamPayload(P,ti){
   return {v:1,s:P.sync||"",id:P.id,d:P.date,c:P.city,r:P.ret?1:0,m:[+P.meet.lat.toFixed(6),+P.meet.lon.toFixed(6),P.meet.name],
     t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(6),+s.lon.toFixed(6),s.prec==="civico"?1:s.prec==="nome"?2:0,s.acc.map(id=>{const c=P.clients[id];return [c.id,c.src,c.rs,c.ins||"",c.piva||"",c.cat||"",c.addr,c.trend||""]}),s.web||""])]};
 }
-function shareUrl(P,ti){return location.origin+location.pathname+"#t="+LZString.compressToEncodedURIComponent(JSON.stringify(teamPayload(P,ti)))}
+/* codifica solo con lettere, cifre, "-" e "_": WhatsApp e altre app non spezzano il link */
+function b64u(bytes){let s="";for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
+function unb64u(t){t=t.replace(/-/g,"+").replace(/_/g,"/");while(t.length%4)t+="=";const s=atob(t),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u}
+function shareUrl(P,ti){return location.origin+location.pathname+"#z="+b64u(LZString.compressToUint8Array(JSON.stringify(teamPayload(P,ti))))}
 function readHash(){
-  const m=location.hash.match(/#t=(.+)$/);if(!m)return null;
+  const m=location.hash.match(/#([tz])=(.+)$/);if(!m)return location.hash.length>3&&/^#[tz]/.test(location.hash)?{error:true}:null;
   try{
-    const o=JSON.parse(LZString.decompressFromEncodedURIComponent(m[1]));
+    const raw=m[1]==="z"?LZString.decompressFromUint8Array(unb64u(decodeURIComponent(m[2]))):LZString.decompressFromEncodedURIComponent(m[2]);
+    const o=JSON.parse(raw);if(!o||!o.t)throw 0;
     const clients={};
     const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{clients[a[0]]={id:a[0],src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
     T.stops.forEach(s=>{s.addr=cleanAddr(clients[s.acc[0]].addr)});
@@ -779,7 +783,7 @@ $("#b-expand").onclick=()=>expandMap(!$("#mapwrap").classList.contains("full"));
 
 function boot(){
   shared=readHash();
-  if(shared&&shared.error){shared=null;document.body.insertAdjacentHTML("afterbegin",`<div class="msg err" style="margin:10px">Il link è incompleto o danneggiato. Chiedi di rimandarlo.</div>`)}
+  if(shared&&shared.error){document.body.innerHTML=`<div class="page"><div class="card"><h2>Link incompleto</h2><p>Il link della coppia si è interrotto durante l'invio, quindi non contiene il percorso. Chiedi al responsabile di rimandarlo con il tasto <b>Copia link</b>, incollandolo da solo nel messaggio.</p></div></div>`;return}
   renderTabs();
   if(shared){
     const T=shared.teams[0];
