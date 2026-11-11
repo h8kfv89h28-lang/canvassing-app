@@ -427,7 +427,7 @@ async function fetchGeoms(){
 function teamPayload(P,ti){
   const T=P.teams[ti];
   return {v:1,s:P.sync||"",id:P.id,d:P.date,c:P.city,r:P.ret?1:0,m:[+P.meet.lat.toFixed(6),+P.meet.lon.toFixed(6),P.meet.name],
-    t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(6),+s.lon.toFixed(6),s.prec==="civico"?1:s.prec==="nome"?2:0,s.acc.map(id=>{const c=P.clients[id];return [c.id,c.src,c.rs,c.ins||"",c.piva||"",c.cat||"",c.addr,c.trend||""]}),s.web||""])]};
+    t:[T.code,T.color,T.stops.map(s=>[+s.lat.toFixed(5),+s.lon.toFixed(5),s.prec==="civico"?1:s.prec==="nome"?2:0,s.acc.map(id=>{const c=P.clients[id];return [c.id.replace(/^[A-Z]+-/,""),c.src,c.rs,c.ins&&c.ins!==c.rs?c.ins:"",c.piva||"",(c.cat||"").slice(0,24),c.addr,""]}),s.prec==="nome"?(s.web||"").replace("Indirizzo della lista non trovato. Trovata l'attività","Trovata").replace(": verifica sul posto",""):""])]};
 }
 /* codifica solo con lettere, cifre, "-" e "_": WhatsApp e altre app non spezzano il link */
 function b64u(bytes){let s="";for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
@@ -439,7 +439,7 @@ function readHash(){
     const raw=m[1]==="z"?LZString.decompressFromUint8Array(unb64u(decodeURIComponent(m[2]))):LZString.decompressFromEncodedURIComponent(m[2]);
     const o=JSON.parse(raw);if(!o||!o.t)throw 0;
     const clients={};
-    const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{clients[a[0]]={id:a[0],src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
+    const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{const cid=String(a[0]).startsWith(a[1]+"-")?a[0]:a[1]+"-"+a[0];a[0]=cid;clients[cid]={id:cid,src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
     T.stops.forEach(s=>{s.addr=cleanAddr(clients[s.acc[0]].addr)});
     return {sync:o.s||"",id:o.id,date:o.d,city:o.c,ret:!!o.r,meet:{lat:o.m[0],lon:o.m[1],name:o.m[2]},clients,teams:[T],shared:true};
   }catch(e){return {error:true}}
