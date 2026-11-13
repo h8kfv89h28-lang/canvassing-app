@@ -1,8 +1,8 @@
 /* Canvassing – service worker: l'app si apre anche con poco segnale.
    Pagina: prima la rete (versione aggiornata), poi la copia salvata.
    File con ?v=N: dalla copia salvata. Mappa (tile OSM): copia salvata delle zone già viste. */
-const V="cv-v9", TILES="cv-tiles";
-const SHELL=["./","index.html","app.css?v=9","app.js?v=9","vendor/leaflet.css","vendor/leaflet.js","vendor/lz-string.min.js","vendor/xlsx.core.min.js","icon.png","manifest.json"];
+const V="cv-v10", TILES="cv-tiles";
+const SHELL=["./","index.html","app.css?v=10","app.js?v=10","vendor/leaflet.css","vendor/leaflet.js","vendor/lz-string.min.js","vendor/xlsx.core.min.js","icon.png","manifest.json"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==V&&k!==TILES).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 const timeout=(p,ms)=>Promise.race([p,new Promise((_,ko)=>setTimeout(()=>ko(new Error("timeout")),ms))]);
