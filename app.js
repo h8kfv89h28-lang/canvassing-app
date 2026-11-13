@@ -360,7 +360,10 @@ function makeTeams(stops,k,start,ret){
     return {code:CODES[j],color:COLORS[j%COLORS.length],stops:ordered};
   });
 }
-function reorderTeam(T,start,ret){T.stops=orderRoute(start,T.stops,ret);T.geom=null}
+function reorderTeam(T,start,ret){T.stops=orderRoute(start,T.stops,ret);T.geom=null;T.changed=Date.now()}
+/* link già inviato ma percorso cambiato dopo: la coppia sta seguendo un giro vecchio */
+const stale=T=>!!(T.sent&&T.changed&&T.changed>T.sent);
+const staleMsg=T=>`<div class="msg warn" style="margin-bottom:10px"><b>Percorso modificato dopo l'invio.</b> La coppia ${T.code} ha ancora il giro vecchio: rimandale il link.</div>`;
 
 /* ---------- calcolo ---------- */
 async function calculate(){
@@ -429,7 +432,7 @@ async function fetchGeoms(){
   const P=current();if(!P)return;
   for(const T of P.teams){if(!T.geom)await fetchGeom(T,P.meet,P.ret)}
   if(P===plan)LS.set("plan",plan);
-  drawMap();renderPanel();
+  drawMap();renderPairbar();renderPanel();
 }
 
 /* ---------- condivisione ---------- */
@@ -630,7 +633,7 @@ function renderPairbar(){
   bar.classList.toggle("hidden",!!P.shared);
   if(P.shared)return;
   const mk=(lab,i,c)=>{const b=document.createElement("button");b.textContent=lab;b.style.setProperty("--c",c);if(i===curTeam)b.classList.add("on");b.onclick=()=>{curTeam=i;selStop=null;drawMap.refit=true;drawMap();renderPairbar();renderPanel()};bar.appendChild(b)};
-  P.teams.forEach((T,i)=>mk("Coppia "+T.code+" · "+T.stops.reduce((s,x)=>s+x.acc.length,0),i,T.color));
+  P.teams.forEach((T,i)=>mk("Coppia "+T.code+" · "+T.stops.reduce((s,x)=>s+x.acc.length,0)+(stale(T)?" ⚠︎":""),i,T.color));
   mk("Tutte",-1,"#0b2d5b");
 }
 function nextStop(P,T){
@@ -663,6 +666,7 @@ function renderPanel(){
     ${P.shared?"":`<button class="btn small primary" id="b-share">Invia link alla coppia ${T.code}</button>`}
   </div>
   ${!P.shared&&P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b> non sono in nessuna coppia: li trovi in fondo alla pagina per posizionarli sulla mappa.</div>`:""}
+  ${!P.shared&&stale(T)?staleMsg(T):""}
   <div id="nextbox" class="next"></div>
   <div class="legs small muted" style="margin-bottom:10px"><div style="margin-bottom:6px">Percorso su Google Maps:</div>${gLegs(P,T).map(l=>`<a class="btn small${l.full?" primary":""}" href="${l.u}" target="_blank" rel="noopener">${esc(l.t)}</a>`).join("")}${T.stops.length>9?`<div class="small muted" style="margin-top:4px">Con più di 10 fermate l'app Google Maps può mostrare solo le prime: in quel caso usa gli spezzoni.</div>`:""}</div>`;
   T.stops.forEach((s,i)=>{
@@ -710,13 +714,13 @@ function renderAll(P,panel){
     <div class="row"><button class="btn small" id="b-xls">Scarica esiti in Excel</button></div></div>`;
   P.teams.forEach((T,i)=>{const n=T.stops.reduce((s,x)=>s+x.acc.length,0),d=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
     h+=`<div class="card"><h2 style="color:${T.color}">Coppia ${T.code}</h2><div class="sum"><span><b>${d}/${n}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km</span>${T.km!=null?`<span>≈ <b>${durTxt(T,n,false)}</b></span>`:""}<span class="pbar"><i style="width:${n?Math.round(d/n*100):0}%;background:${T.color}"></i></span></div>
-      <div class="row"><button class="btn small primary" data-sh="${i}">Invia link</button><button class="btn small" data-open="${i}">Apri</button></div></div>`});
+      ${stale(T)?staleMsg(T):""}<div class="row"><button class="btn small primary" data-sh="${i}">${stale(T)?"Rimanda link":T.sent?"Invia di nuovo":"Invia link"}</button><button class="btn small" data-open="${i}">Apri</button></div></div>`});
   h+=`<div class="card"><h2>Modifica</h2><p class="muted small">Ricalcola le zone da zero, ad esempio dopo aver spostato il ritrovo o cambiato il numero di coppie.</p><button class="btn small" id="b-recalc">Ricalcola zone e percorsi</button> <button class="btn small ghost" id="b-meetmove">Sposta ritrovo sulla mappa</button></div>`;
   panel.innerHTML=h;
   panel.querySelectorAll("[data-sh]").forEach(b=>b.onclick=()=>shareSheet(P,+b.dataset.sh));
   $("#b-xls").onclick=()=>exportXls(P);
   panel.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{curTeam=+b.dataset.open;drawMap.refit=true;drawMap();renderPairbar();renderPanel()});
-  $("#b-recalc").onclick=()=>{const ids=P.teams.flatMap(T=>T.stops);const k=Math.min(settings.k,ids.length);P.teams=makeTeams(ids,k,P.meet,P.ret);savePlan();drawMap.refit=true;fetchGeoms();renderPairbar();toast("Zone ricalcolate")};
+  $("#b-recalc").onclick=()=>{const ids=P.teams.flatMap(T=>T.stops);const k=Math.min(settings.k,ids.length);const sent={};P.teams.forEach(T=>{sent[T.code]=T.sent});P.teams=makeTeams(ids,k,P.meet,P.ret);P.teams.forEach(T=>{T.sent=sent[T.code];T.changed=Date.now()});savePlan();drawMap.refit=true;fetchGeoms();renderPairbar();toast("Zone ricalcolate")};
   $("#b-meetmove").onclick=()=>{moveMode={kind:"meet"};expandMap(true);toast("Tocca sulla mappa il nuovo punto di ritrovo",4000)};
 }
 /* stima: spostamento (a piedi 4,5 km/h, in auto 25 km/h in città + 5 min a tappa per parcheggio) + 12 min a cliente */
@@ -752,7 +756,7 @@ function selectStop(ti,i,scroll){
   if(scroll){const el=$("#st-"+i);if(el)el.scrollIntoView({behavior:"smooth",block:"center"})}
 }
 function shareSheet(P,ti){
-  const T=P.teams[ti];const url=shareUrl(P,ti);
+  const T=P.teams[ti];if(!P.shared){T.sent=Date.now();savePlan();setTimeout(()=>{renderPairbar();renderPanel()},400)}const url=shareUrl(P,ti);
   const msg=`Canvassing ${P.city} ${P.date} – Coppia ${T.code}: ${T.stops.reduce((s,x)=>s+x.acc.length,0)} clienti. Apri il link (in Safari) per mappa, tappe e navigazione:\n${url}`;
   const sh=$("#sheet"),inn=sh.querySelector(".sheet-in");
   inn.innerHTML=`<h3>Link per la coppia ${T.code}</h3><p class="small muted">Il link contiene i clienti di questa coppia (nomi, indirizzi, P.IVA): chi lo riceve li vede. Non passa da nessun server. Gli esiti restano sul telefono di chi li segna: a fine giro la coppia ti manda il riepilogo su WhatsApp.</p>
