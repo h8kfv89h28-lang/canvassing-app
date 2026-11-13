@@ -373,11 +373,12 @@ async function calculate(){
     else if(settings.meet){setP(0,1,"Cerco il punto di ritrovo…");const p=await geocodePlace(settings.meet,settings.city,center);if(p)meet={...p,name:settings.meet}}
     if(!meet){meet={...center,name:"Centro di "+settings.city};msg.innerHTML+=`<div class="msg warn">Punto di ritrovo non trovato: uso il centro di ${esc(settings.city)}. Puoi spostarlo dalla mappa.</div>`}
     // clienti
-    const clients=[];const seen=new Set();const dups=[];
+    const clients=[];const seen=new Set();const dups=[];const usedIds=new Set();
     files.forEach(f=>f.rows.forEach((r,i)=>{
       const ac=cleanAddr(r.addr);const city=r.city||settings.city;
       const dk=(r.rs+"|"+ac).toLowerCase();if(seen.has(dk)){dups.push(r.rs+" – "+r.addr+" ("+f.label+")");return}seen.add(dk);
-      clients.push({id:f.label+"-"+(r.cid||i+1),src:f.label,rs:r.rs,ins:r.ins,piva:r.piva,cat:r.cat,addr:r.addr,addrClean:ac,city,cap:r.cap,trend:r.trend});
+      let id=f.label+"-"+String(r.cid||i+1).replace(/[^\w.]/g,"");const base=id;let n=2;while(usedIds.has(id))id=base+"_"+(n++);usedIds.add(id);
+      clients.push({id,src:f.label,rs:r.rs,ins:r.ins,piva:r.piva,cat:r.cat,addr:r.addr,addrClean:ac,city,cap:r.cap,trend:r.trend});
     }));
     const miss=[];
     for(let i=0;i<clients.length;i++){
@@ -437,11 +438,15 @@ function readHash(){
   const m=location.hash.match(/#([tz])=(.+)$/);if(!m)return location.hash.length>3&&/^#[tz]/.test(location.hash)?{error:true}:null;
   try{
     const raw=m[1]==="z"?LZString.decompressFromUint8Array(unb64u(decodeURIComponent(m[2]))):LZString.decompressFromEncodedURIComponent(m[2]);
-    const o=JSON.parse(raw);if(!o||!o.t)throw 0;
+    const o=JSON.parse(raw);if(!o||!o.t||!Array.isArray(o.t[2]))throw 0;
+    const num=x=>{const n=+x;if(!isFinite(n))throw 0;return n};
+    const str=x=>x==null?"":String(x);
     const clients={};
-    const T={code:o.t[0],color:o.t[1],stops:o.t[2].map(s=>({lat:s[0],lon:s[1],prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{const cid=String(a[0]).startsWith(a[1]+"-")?a[0]:a[1]+"-"+a[0];a[0]=cid;clients[cid]={id:cid,src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
+    const T={code:str(o.t[0]).replace(/[^A-Z0-9]/gi,"").slice(0,3)||"A",color:/^#[0-9a-f]{6}$/i.test(o.t[1])?o.t[1]:"#1d4ed8",stops:o.t[2].map(s=>({lat:num(s[0]),lon:num(s[1]),prec:s[2]===1?"civico":s[2]===2?"nome":"via",web:s[4]||"",acc:s[3].map(a=>{a=a.map(str);const cid=String(a[0]).startsWith(a[1]+"-")?a[0]:a[1]+"-"+a[0];a[0]=cid;clients[cid]={id:cid,src:a[1],rs:a[2],ins:a[3],piva:a[4],cat:a[5],addr:a[6],trend:a[7]};return a[0]})}))};
     T.stops.forEach(s=>{s.addr=cleanAddr(clients[s.acc[0]].addr)});
-    return {sync:o.s||"",id:o.id,date:o.d,city:o.c,ret:!!o.r,meet:{lat:o.m[0],lon:o.m[1],name:o.m[2]},clients,teams:[T],shared:true};
+    const sync=/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(o.s||"")?o.s:"";
+    const date=/^\d{4}-\d{2}-\d{2}$/.test(o.d)?o.d:new Date().toISOString().slice(0,10);
+    return {sync,id:str(o.id).replace(/[^\w]/g,"")||"x",date,city:str(o.c),ret:!!o.r,meet:{lat:num(o.m[0]),lon:num(o.m[1]),name:str(o.m[2])},clients,teams:[T],shared:true};
   }catch(e){return {error:true}}
 }
 function current(){return shared||plan}
@@ -540,7 +545,7 @@ const Leaf={
   init(){
     this.m=L.map("map",{zoomControl:false,attributionControl:true,tapTolerance:20,bounceAtZoomLimits:false,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:90}).setView([45.89,11.04],13);
     L.control.zoom({position:"bottomright"}).addTo(this.m);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap",keepBuffer:4,updateWhenIdle:false,detectRetina:false}).addTo(this.m);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap",keepBuffer:4,updateWhenIdle:false,detectRetina:false,crossOrigin:true}).addTo(this.m);
     this.layer=L.layerGroup().addTo(this.m);
     this.m.on("click",e=>MAP.onClick&&MAP.onClick({lat:e.latlng.lat,lon:e.latlng.lng}));
   },
@@ -638,7 +643,7 @@ function renderPanel(){
   const T=P.teams[curTeam];if(!T){curTeam=0;return renderPanel()}
   const E=getE(P);
   const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
-  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>Esiti condivisi${lastPull?` · <span id="sync-at">${lastPull}</span>`:""}</span>`:""}</div>
+  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span class="pbar" aria-hidden="true"><i id="pbar" style="width:${nAcc?Math.round(nDone/nAcc*100):0}%;background:${T.color}"></i></span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>Esiti condivisi${lastPull?` · <span id="sync-at">${lastPull}</span>`:""}</span>`:""}</div>
   <div class="acts">
     <a class="btn small" href="${appleNav(P.meet,P.meet.name)}" target="_blank" rel="noopener">Naviga al ritrovo</a>
     <button class="btn small" id="b-wa">Riepilogo su WhatsApp</button>
@@ -672,8 +677,9 @@ function renderPanel(){
   panel.querySelectorAll(".esiti").forEach(row=>row.onclick=ev=>{const b=ev.target.closest("button");if(!b)return;const id=row.dataset.id;const cur=(getE(P)[id]||{}).esito;const val=cur===b.dataset.e?"":b.dataset.e;setE(P,id,{esito:val});
     row.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.e===val));
     if(navigator.vibrate)navigator.vibrate(10);
-    refreshProgress(P,T);});
-  panel.querySelectorAll("input.note").forEach(n=>n.onchange=()=>{setE(P,n.dataset.id,{nota:n.value.trim()})});
+    refreshProgress(P,T,val?id:null);});
+  panel.querySelectorAll("input.note").forEach(n=>{const save=()=>{clearTimeout(n._t);const v=n.value.trim();if(((getE(P)[n.dataset.id]||{}).nota||"")!==v)setE(P,n.dataset.id,{nota:v})};
+    n.oninput=()=>{clearTimeout(n._t);n._t=setTimeout(save,700)};n.onchange=save;n.onblur=save;n.onkeydown=e=>{if(e.key==="Enter")n.blur()}});
   panel.querySelectorAll("[data-map]").forEach(b=>b.onclick=()=>selectStop(curTeam,+b.dataset.map,true));
   $("#s-walk").onchange=e=>{LS.set("walk",e.target.checked);renderPanel()};
   $("#s-hide").onchange=e=>{LS.set("hide",e.target.checked);applyHide(P,T)};applyHide(P,T);
@@ -698,9 +704,12 @@ function renderAll(P,panel){
   $("#b-meetmove").onclick=()=>{moveMode={kind:"meet"};expandMap(true);toast("Tocca sulla mappa il nuovo punto di ritrovo",4000)};
 }
 function stopDone(E,s){return s.acc.every(id=>E[id]&&E[id].esito)}
-function refreshProgress(P,T){
-  const E=getE(P);const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
-  const c=$("#cnt-done");if(c)c.textContent=nDone+"/"+nAcc;
+function refreshProgress(P,T,justId){
+  const E=getE(P);
+  const pb=$("#pbar");const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
+  const c=$("#cnt-done");if(c)c.textContent=nDone+"/"+nAcc;if(pb)pb.style.width=(nAcc?Math.round(nDone/nAcc*100):0)+"%";
+  if(justId){const si=T.stops.findIndex(s=>s.acc.includes(justId));if(si>=0&&stopDone(E,T.stops[si])){const ni=nextStop(P,T);
+    if(ni<0)toast("Giro completato! Manda il riepilogo su WhatsApp",4000);else if(ni!==si)toast("Tappa "+(si+1)+" fatta · prossima: "+(ni+1)+" – "+T.stops[ni].addr,3200)}}
   T.stops.forEach((s,i)=>{const el=$("#st-"+i);if(el)el.classList.toggle("done",stopDone(E,s))});
   renderNext();drawMap();
 }
@@ -776,7 +785,7 @@ function initSettingsUI(){
     startSync();
   };
   $("#b-gkey-del").onclick=()=>{settings.gkey="";$("#s-gkey").value="";LS.set("settings",settings);setTimeout(()=>location.reload(),300)};
-  $("#b-reset").onclick=()=>{if(!confirm("Cancello liste, percorsi ed esiti salvati su questo telefono?"))return;["files","plan","geo"].forEach(LS.del);try{Object.keys(localStorage).filter(k=>k.startsWith("cv:esiti:")).forEach(k=>localStorage.removeItem(k))}catch(e){}location.reload()};
+  $("#b-reset").onclick=()=>{if(!confirm("Cancello liste, percorsi ed esiti salvati su questo telefono?"))return;["files","plan","geo","q"].forEach(LS.del);try{Object.keys(localStorage).filter(k=>k.startsWith("cv:esiti:")||k.startsWith("cv:remote:")).forEach(k=>localStorage.removeItem(k))}catch(e){}location.reload()};
 }
 $("#b-locate").onclick=()=>startGps(true);
 $("#b-expand").onclick=()=>expandMap(!$("#mapwrap").classList.contains("full"));
@@ -796,7 +805,14 @@ function boot(){
   go(location.hash!=="#impostazioni"&&plan&&LS.get("page","liste")==="mappa"?"mappa":"liste");
 }
 window.addEventListener("hashchange",()=>location.reload());
+/* salva la nota in corso se Safari va in background o si chiude */
+window.addEventListener("pagehide",()=>{const a=document.activeElement;if(a&&a.classList&&a.classList.contains("note"))a.blur()});
+document.addEventListener("visibilitychange",()=>{if(document.hidden){const a=document.activeElement;if(a&&a.classList&&a.classList.contains("note"))a.blur()}});
 function setHH(){document.documentElement.style.setProperty("--hh",$("#top").offsetHeight+"px")}
 window.addEventListener("resize",setHH);
 boot();setHH();if(!shared)startSync();
+/* funziona anche con poco segnale; i dati del telefono non vengono cancellati da Safari */
+if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"))navigator.serviceWorker.register("sw.js").catch(()=>{});
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+window.addEventListener("offline",()=>toast("Sei offline: gli esiti restano salvati sul telefono",3500));
 })();
