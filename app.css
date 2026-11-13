@@ -136,3 +136,11 @@ body.hide-done .stop.done{display:none}
 .chip{font-size:13px;padding:4px 10px;border-radius:14px;background:var(--bg);border:1px solid var(--line)}
 .chip[data-e="Interessato"],.chip[data-e="Tessera / ordine fatto"]{border-color:var(--ok);color:var(--ok)}
 .chip[data-e="Non interessato"],.chip[data-e="Chiuso / cessato"]{border-color:var(--ko);color:var(--ko)}
+/* esiti: griglia 3×2, tutti visibili senza scorrere */
+.esiti{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;overflow:visible;margin-right:0;padding-right:0}
+.esiti button{min-height:42px;padding:6px 4px;line-height:1.15;white-space:normal;text-align:center}
+/* tappe fatte: spunta sulla puntina */
+.pin{position:relative}
+.pin.done{opacity:.6}
+.pin.done::after{content:"✓";position:absolute;right:-6px;top:-6px;width:15px;height:15px;border-radius:50%;background:#6b7280;color:#fff;font:700 10px/15px -apple-system,sans-serif;text-align:center;border:1.5px solid #fff}
+.pin.done.pos::after{background:var(--ok)}

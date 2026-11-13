@@ -19,6 +19,8 @@ function km(a,b){const R=6371,r=Math.PI/180,dLa=(b.lat-a.lat)*r,dLo=(b.lon-a.lon
 const COLORS=["#c2410c","#1d4ed8","#15803d","#7e22ce","#be123c","#0e7490"];
 const CODES="ABCDEF";
 const ESITI=["","Interessato","Tessera / ordine fatto","Da richiamare","Titolare assente","Non interessato","Chiuso / cessato"];
+const ESITO_BREVE={"Tessera / ordine fatto":"Tessera / ordine","Da richiamare":"Richiamare","Titolare assente":"Assente","Non interessato":"Non interessato","Chiuso / cessato":"Chiuso"};
+const POS=new Set(["Interessato","Tessera / ordine fatto"]);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 /* ---------- stato ---------- */
@@ -114,6 +116,7 @@ async function onFiles(list){
   }
   saveFiles();renderFiles();
 }
+function saveGeo(){const ks=Object.keys(geoCache);if(ks.length>2500)ks.slice(0,ks.length-2000).forEach(k=>{if(k[0]!=="#")delete geoCache[k]});if(!LS.set("geo",geoCache)){geoCache={};LS.set("geo",{})}}
 function saveFiles(){if(!LS.set("files",files))toast("Memoria del telefono piena: le liste non sono state salvate")}
 function renderFiles(){
   const box=$("#files");box.innerHTML="";
@@ -251,7 +254,7 @@ async function geocodeOne(addr,city,cap,center,names){
       else if(!res)res={lat:hit.lat,lon:hit.lon,prec:"nome",web:"Indirizzo della lista non trovato. Trovata l'attivit\u00e0 \u00ab"+hit.name+"\u00bb in "+hit.where+", "+city+": verifica sul posto"};
     }
   }
-  if(res){geoCache[key]=res;LS.set("geo",geoCache)}
+  if(res){geoCache[key]=res;saveGeo()}
   return res;
 }
 async function geocodeCity(city){
@@ -261,7 +264,7 @@ async function geocodeCity(city){
   if(await loadGoogle()){try{const {results}=await new google.maps.Geocoder().geocode({address:city+", Italia"});const l=results[0].geometry.location;res={lat:l.lat(),lon:l.lng()}}catch(e){}}
   if(!res){try{const j=await nominatim({city});if(j[0])res={lat:+j[0].lat,lon:+j[0].lon}}catch(e){}}
   if(!res){try{const j=await photon(city+", Italia");const f=j.features&&j.features[0];if(f)res={lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}catch(e){}}
-  if(res){geoCache[key]=res;LS.set("geo",geoCache)}
+  if(res){geoCache[key]=res;saveGeo()}
   return res;
 }
 async function geocodePlace(text,city,center){
@@ -271,7 +274,7 @@ async function geocodePlace(text,city,center){
   if(await loadGoogle()){try{const {results}=await new google.maps.Geocoder().geocode({address:text+", "+city+", Italia"});const l=results[0].geometry.location;res={lat:l.lat(),lon:l.lng()}}catch(e){}}
   if(!res){try{const j=await photon(text+", "+city,center);const f=(j.features||[]).find(f=>!center||km({lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]},center)<25);if(f)res={lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}}catch(e){}}
   if(!res){try{const j=await nominatim({q:text+", "+city});const f=j.find(x=>!center||km({lat:+x.lat,lon:+x.lon},center)<25);if(f)res={lat:+f.lat,lon:+f.lon}}catch(e){}}
-  if(res){geoCache[key]=res;LS.set("geo",geoCache)}
+  if(res){geoCache[key]=res;saveGeo()}
   return res;
 }
 
@@ -598,9 +601,9 @@ function drawMap(){
   const pts=[P.meet];
   teams.forEach(T=>{
     T.stops.forEach((s,i)=>{
-      const done=s.acc.every(id=>E[id]&&E[id].esito);
+      const done=s.acc.every(id=>E[id]&&E[id].esito),pos=done&&s.acc.some(id=>POS.has(E[id].esito));
       const sel=selStop&&selStop.t===T.code&&selStop.i===i;
-      MAP.pin(s,showAll?T.code+(i+1):String(i+1),(done?"done ":"")+(sel?"sel":""),T.color,()=>{selectStop(P.teams.indexOf(T),i,true)},sel?1000:0);
+      MAP.pin(s,showAll?T.code+(i+1):String(i+1),(done?"done "+(pos?"pos ":""):"")+(sel?"sel":""),T.color,()=>{selectStop(P.teams.indexOf(T),i,true)},sel?1000:0);
       pts.push(s);
     });
   });
@@ -670,7 +673,7 @@ function renderPanel(){
     s.acc.forEach(id=>{const c=P.clients[id],e=E[id]||{};
       h+=`<div class="acc"><div class="rs"><span class="tag ${esc(c.src)}">${esc(c.src)}</span>${esc(c.ins||c.rs)}</div>
         <div class="meta">${c.ins?esc(c.rs)+" · ":""}${c.piva?"P.IVA "+esc(c.piva)+" · ":""}${esc(c.cat||"")}${c.trend?" · "+esc(c.trend):""}</div>
-        <div class="esiti" data-id="${esc(id)}">${ESITI.slice(1).map(x=>`<button data-e="${esc(x)}" class="${e.esito===x?"on":""}" aria-pressed="${e.esito===x}">${esc(x)}</button>`).join("")}</div>
+        <div class="esiti" data-id="${esc(id)}">${ESITI.slice(1).map(x=>`<button data-e="${esc(x)}" class="${e.esito===x?"on":""}" aria-pressed="${e.esito===x}" aria-label="${esc(x)}">${esc(ESITO_BREVE[x]||x)}</button>`).join("")}</div>
         <input class="note" data-id="${esc(id)}" placeholder="Note (referente, telefono, richiamare il…)" value="${esc(e.nota||"")}"></div>`});
     h+=`<div class="ft"><a class="btn nav small" href="${appleNav(s,names)}" target="_blank" rel="noopener">Naviga</a><button class="btn small" data-map="${i}">Mappa</button></div>`;
     if(!P.shared)h+=`<div class="mgr">Sposta in <select data-move="${i}"><option value="">—</option>${P.teams.map((t,j)=>j===curTeam?"":`<option value="${j}">Coppia ${t.code}</option>`).join("")}</select><button class="btn small ghost" data-pos="${i}">Correggi posizione</button></div>`;
