@@ -145,9 +145,10 @@ function loadGoogle(){
   });
   return gReady;
 }
-let lastNom=0;
+let nomQ=Promise.resolve();
+function nomSlot(){const p=nomQ.then(()=>sleep(1100));const ready=nomQ;nomQ=p;return ready}
 async function nominatim(params){
-  const wait=1100-(Date.now()-lastNom); if(wait>0)await sleep(wait); lastNom=Date.now();
+  await nomSlot();
   const u="https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=3&countrycodes=it&accept-language=it&"+new URLSearchParams(params);
   const r=await fetch(u);if(!r.ok)throw new Error("nominatim "+r.status);return r.json();
 }
@@ -381,12 +382,16 @@ async function calculate(){
       clients.push({id,src:f.label,rs:r.rs,ins:r.ins,piva:r.piva,cat:r.cat,addr:r.addr,addrClean:ac,city,cap:r.cap,trend:r.trend});
     }));
     const miss=[];
-    for(let i=0;i<clients.length;i++){
-      const c=clients[i];setP(i,clients.length,`Trovo gli indirizzi: ${i+1} di ${clients.length}`);
+    let next=0,doneN=0;const t0=Date.now();
+    const worker=async()=>{while(next<clients.length){const c=clients[next++];
       const names=[...new Set([c.ins,cleanName(c.rs)].map(x=>cleanName(x)).filter(Boolean))];
-      const g=c.addrClean?await geocodeOne(c.addrClean,c.city,c.cap,center,names):(names.length?await geocodeOne("",c.city,c.cap,center,names):null);
+      let g=null;try{g=c.addrClean?await geocodeOne(c.addrClean,c.city,c.cap,center,names):(names.length?await geocodeOne("",c.city,c.cap,center,names):null)}catch(e){}
       if(g){c.lat=g.lat;c.lon=g.lon;c.prec=g.prec;if(g.web)c.web=g.web}else miss.push(c);
-    }
+      doneN++;const left=doneN>4?Math.round((Date.now()-t0)/doneN*(clients.length-doneN)/1000):0;
+      setP(doneN,clients.length,`Trovo gli indirizzi: ${doneN} di ${clients.length}`+(left>20?` · circa ${left<90?left+" s":Math.round(left/60)+" min"}`:""))}};
+    setP(0,clients.length,`Trovo gli indirizzi: 0 di ${clients.length}`);
+    await Promise.all([worker(),worker(),worker()]);
+    miss.sort((a,b)=>clients.indexOf(a)-clients.indexOf(b));
     setP(1,1,"Divido le zone e calcolo i percorsi…");await sleep(30);
     const ok=clients.filter(c=>c.lat!=null);
     if(!ok.length)throw new Error("Non sono riuscito a trovare nessun indirizzo. Controlla la connessione e il comune.");
@@ -643,7 +648,7 @@ function renderPanel(){
   const T=P.teams[curTeam];if(!T){curTeam=0;return renderPanel()}
   const E=getE(P);
   const nAcc=T.stops.reduce((s,x)=>s+x.acc.length,0),nDone=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
-  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span class="pbar" aria-hidden="true"><i id="pbar" style="width:${nAcc?Math.round(nDone/nAcc*100):0}%;background:${T.color}"></i></span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span><span>Ritrovo: <b>${esc(P.meet.name)}</b></span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>Esiti condivisi${lastPull?` · <span id="sync-at">${lastPull}</span>`:""}</span>`:""}</div>
+  let h=`<div class="sum"><span style="color:${T.color};font-weight:800">Coppia ${T.code}</span><span><b id="cnt-done">${nDone}/${nAcc}</b> visitati</span><span class="pbar" aria-hidden="true"><i id="pbar" style="width:${nAcc?Math.round(nDone/nAcc*100):0}%;background:${T.color}"></i></span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km${T.geom?"":" circa"}</span>${T.km!=null?`<span>≈ <b>${durTxt(T,nAcc,LS.get("walk",false))}</b></span>`:""}<span>Ritrovo: <b>${esc(P.meet.name)}</b></span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>Esiti condivisi${lastPull?` · <span id="sync-at">${lastPull}</span>`:""}</span>`:""}</div>
   <div class="acts">
     <a class="btn small" href="${appleNav(P.meet,P.meet.name)}" target="_blank" rel="noopener">Naviga al ritrovo</a>
     <button class="btn small" id="b-wa">Riepilogo su WhatsApp</button>
@@ -663,7 +668,7 @@ function renderPanel(){
     s.acc.forEach(id=>{const c=P.clients[id],e=E[id]||{};
       h+=`<div class="acc"><div class="rs"><span class="tag ${esc(c.src)}">${esc(c.src)}</span>${esc(c.ins||c.rs)}</div>
         <div class="meta">${c.ins?esc(c.rs)+" · ":""}${c.piva?"P.IVA "+esc(c.piva)+" · ":""}${esc(c.cat||"")}${c.trend?" · "+esc(c.trend):""}</div>
-        <div class="esiti" data-id="${esc(id)}">${ESITI.slice(1).map(x=>`<button data-e="${esc(x)}" class="${e.esito===x?"on":""}">${esc(x)}</button>`).join("")}</div>
+        <div class="esiti" data-id="${esc(id)}">${ESITI.slice(1).map(x=>`<button data-e="${esc(x)}" class="${e.esito===x?"on":""}" aria-pressed="${e.esito===x}">${esc(x)}</button>`).join("")}</div>
         <input class="note" data-id="${esc(id)}" placeholder="Note (referente, telefono, richiamare il…)" value="${esc(e.nota||"")}"></div>`});
     h+=`<div class="ft"><a class="btn nav small" href="${appleNav(s,names)}" target="_blank" rel="noopener">Naviga</a><button class="btn small" data-map="${i}">Mappa</button></div>`;
     if(!P.shared)h+=`<div class="mgr">Sposta in <select data-move="${i}"><option value="">—</option>${P.teams.map((t,j)=>j===curTeam?"":`<option value="${j}">Coppia ${t.code}</option>`).join("")}</select><button class="btn small ghost" data-pos="${i}">Correggi posizione</button></div>`;
@@ -675,7 +680,7 @@ function renderPanel(){
   panel.innerHTML=h;
   renderNext();
   panel.querySelectorAll(".esiti").forEach(row=>row.onclick=ev=>{const b=ev.target.closest("button");if(!b)return;const id=row.dataset.id;const cur=(getE(P)[id]||{}).esito;const val=cur===b.dataset.e?"":b.dataset.e;setE(P,id,{esito:val});
-    row.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.e===val));
+    row.querySelectorAll("button").forEach(x=>{x.classList.toggle("on",x.dataset.e===val);x.setAttribute("aria-pressed",x.dataset.e===val)});
     if(navigator.vibrate)navigator.vibrate(10);
     refreshProgress(P,T,val?id:null);});
   panel.querySelectorAll("input.note").forEach(n=>{const save=()=>{clearTimeout(n._t);const v=n.value.trim();if(((getE(P)[n.dataset.id]||{}).nota||"")!==v)setE(P,n.dataset.id,{nota:v})};
@@ -703,6 +708,8 @@ function renderAll(P,panel){
   $("#b-recalc").onclick=()=>{const ids=P.teams.flatMap(T=>T.stops);const k=Math.min(settings.k,ids.length);P.teams=makeTeams(ids,k,P.meet,P.ret);savePlan();drawMap.refit=true;fetchGeoms();renderPairbar();toast("Zone ricalcolate")};
   $("#b-meetmove").onclick=()=>{moveMode={kind:"meet"};expandMap(true);toast("Tocca sulla mappa il nuovo punto di ritrovo",4000)};
 }
+/* stima: spostamento (a piedi 4,5 km/h, in auto 25 km/h in città + 5 min a tappa per parcheggio) + 12 min a cliente */
+function durTxt(T,nAcc,walk){const m=Math.round((walk?T.km/4.5*60:T.km/25*60+T.stops.length*5)+nAcc*12);return m<60?m+" min":Math.floor(m/60)+" h"+(m%60?" "+String(m%60).padStart(2,"0"):"")}
 function stopDone(E,s){return s.acc.every(id=>E[id]&&E[id].esito)}
 function refreshProgress(P,T,justId){
   const E=getE(P);
@@ -792,6 +799,8 @@ $("#b-expand").onclick=()=>expandMap(!$("#mapwrap").classList.contains("full"));
 
 function boot(){
   shared=readHash();
+  if(shared&&!shared.error)LS.set("lastShared",{h:location.hash,at:Date.now()});
+  else if(!shared&&!plan&&!files.length){const ls=LS.get("lastShared",null);if(ls&&Date.now()-ls.at<3*864e5&&/^#[tz]=/.test(ls.h)){history.replaceState(null,"",location.pathname+ls.h);shared=readHash();if(shared&&shared.error)shared=null}}
   if(shared&&shared.error){document.body.innerHTML=`<div class="page"><div class="card"><h2>Link incompleto</h2><p>Il link della coppia si è interrotto durante l'invio, quindi non contiene il percorso. Chiedi al responsabile di rimandarlo con il tasto <b>Copia link</b>, incollandolo da solo nel messaggio.</p></div></div>`;return}
   renderTabs();
   if(shared){
