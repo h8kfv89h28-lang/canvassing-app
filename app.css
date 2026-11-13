@@ -132,3 +132,7 @@ body.hide-done .stop.done{display:none}
 .sync.off{background:var(--warn)}
 .pbar{flex:1 1 100%;order:9;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
 .pbar i{display:block;height:100%;width:0;border-radius:4px;transition:width .35s ease}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.chip{font-size:13px;padding:4px 10px;border-radius:14px;background:var(--bg);border:1px solid var(--line)}
+.chip[data-e="Interessato"],.chip[data-e="Tessera / ordine fatto"]{border-color:var(--ok);color:var(--ok)}
+.chip[data-e="Non interessato"],.chip[data-e="Chiuso / cessato"]{border-color:var(--ko);color:var(--ko)}

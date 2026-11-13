@@ -557,7 +557,9 @@ const Leaf={
   clear(){this.layer.clearLayers()},
   pin(p,html,cls,color,onclick,z){const ic=L.divIcon({className:"",html:`<div class="pin ${cls||""}" style="background:${color}">${html}</div>`,iconSize:[28,28],iconAnchor:[14,14]});const mk=L.marker([p.lat,p.lon],{icon:ic,zIndexOffset:z||0}).addTo(this.layer);if(onclick)mk.on("click",onclick);return mk},
   line(coords,color,dash){L.polyline(coords,{color,weight:dash?3:5,opacity:dash?.6:.75,dashArray:dash?"6 8":null}).addTo(this.layer)},
-  fit(pts){if(!pts.length)return;this.m.invalidateSize();this.m.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])),{padding:[30,30],maxZoom:17})},
+  fit(pts){if(!pts.length)return;const b=L.latLngBounds(pts.map(p=>[p.lat,p.lon]));
+    /* se la mappa sta ancora animando uno zoom, Leaflet ignorerebbe il nuovo inquadramento: lo rifaccio a fine animazione */
+    const go=()=>{this.m.invalidateSize();this.m.fitBounds(b,{padding:[30,30],maxZoom:17})};go();const t=Date.now(),chk=()=>{if(Date.now()-t<1200&&!this.m.getBounds().pad(.02).contains(b))go()};this.m.once("zoomend",chk);setTimeout(()=>this.m.off("zoomend",chk),1300)},
   pan(p,z){this.m.setView([p.lat,p.lon],Math.max(z||16,this.m.getZoom()))},
   me(p,acc){if(!this.meMk){this.meMk=L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div class="me"></div>',iconSize:[18,18],iconAnchor:[9,9]}),zIndexOffset:2000}).addTo(this.m);this.meC=L.circle([p.lat,p.lon],{radius:acc||20,color:"#1a73e8",weight:1,fillOpacity:.08}).addTo(this.m)}else{this.meMk.setLatLng([p.lat,p.lon]);this.meC.setLatLng([p.lat,p.lon]).setRadius(acc||20)}},
   resize(){this.m.invalidateSize();setTimeout(()=>this.m.invalidateSize(),80)}
@@ -698,18 +700,34 @@ function renderPanel(){
 }
 function renderAll(P,panel){
   let h=`<div class="sum"><span>Ritrovo: <b>${esc(P.meet.name)}</b></span><span>${P.date}</span></div>`+(P.missing&&P.missing.length?`<div class="msg warn" style="margin-bottom:10px"><b>${P.missing.length} clienti senza posizione</b>: apri una coppia e scorri in fondo per posizionarli.</div>`:"");
-  P.teams.forEach((T,i)=>{const n=T.stops.reduce((s,x)=>s+x.acc.length,0);
-    h+=`<div class="card"><h2 style="color:${T.color}">Coppia ${T.code}</h2><div class="sum"><span><b>${n}</b> clienti</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km</span></div>
+  const E=getE(P),tot={};let all=0,allDone=0;
+  P.teams.forEach(T=>T.stops.forEach(s=>s.acc.forEach(id=>{all++;const x=E[id]&&E[id].esito;if(x){allDone++;tot[x]=(tot[x]||0)+1}})));
+  h+=`<div class="card"><h2>Andamento della giornata</h2><div class="sum"><span><b>${allDone}/${all}</b> clienti visitati</span>${P.sync?`<span><i id="sync-dot" class="sync ok"></i>esiti in tempo reale${lastPull?" · "+lastPull:""}</span>`:`<span>esiti di questo telefono</span>`}<span class="pbar"><i style="width:${all?Math.round(allDone/all*100):0}%;background:var(--brand)"></i></span></div>
+    ${allDone?`<div class="chips">${ESITI.slice(1).filter(x=>tot[x]).map(x=>`<span class="chip" data-e="${esc(x)}">${esc(x)} <b>${tot[x]}</b></span>`).join("")}</div>`:""}
+    <div class="row"><button class="btn small" id="b-xls">Scarica esiti in Excel</button></div></div>`;
+  P.teams.forEach((T,i)=>{const n=T.stops.reduce((s,x)=>s+x.acc.length,0),d=T.stops.reduce((s,x)=>s+x.acc.filter(id=>E[id]&&E[id].esito).length,0);
+    h+=`<div class="card"><h2 style="color:${T.color}">Coppia ${T.code}</h2><div class="sum"><span><b>${d}/${n}</b> visitati</span><span><b>${T.stops.length}</b> tappe</span><span><b>${T.km!=null?T.km:"…"}</b> km</span>${T.km!=null?`<span>≈ <b>${durTxt(T,n,false)}</b></span>`:""}<span class="pbar"><i style="width:${n?Math.round(d/n*100):0}%;background:${T.color}"></i></span></div>
       <div class="row"><button class="btn small primary" data-sh="${i}">Invia link</button><button class="btn small" data-open="${i}">Apri</button></div></div>`});
   h+=`<div class="card"><h2>Modifica</h2><p class="muted small">Ricalcola le zone da zero, ad esempio dopo aver spostato il ritrovo o cambiato il numero di coppie.</p><button class="btn small" id="b-recalc">Ricalcola zone e percorsi</button> <button class="btn small ghost" id="b-meetmove">Sposta ritrovo sulla mappa</button></div>`;
   panel.innerHTML=h;
   panel.querySelectorAll("[data-sh]").forEach(b=>b.onclick=()=>shareSheet(P,+b.dataset.sh));
+  $("#b-xls").onclick=()=>exportXls(P);
   panel.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{curTeam=+b.dataset.open;drawMap.refit=true;drawMap();renderPairbar();renderPanel()});
   $("#b-recalc").onclick=()=>{const ids=P.teams.flatMap(T=>T.stops);const k=Math.min(settings.k,ids.length);P.teams=makeTeams(ids,k,P.meet,P.ret);savePlan();drawMap.refit=true;fetchGeoms();renderPairbar();toast("Zone ricalcolate")};
   $("#b-meetmove").onclick=()=>{moveMode={kind:"meet"};expandMap(true);toast("Tocca sulla mappa il nuovo punto di ritrovo",4000)};
 }
 /* stima: spostamento (a piedi 4,5 km/h, in auto 25 km/h in città + 5 min a tappa per parcheggio) + 12 min a cliente */
 function durTxt(T,nAcc,walk){const m=Math.round((walk?T.km/4.5*60:T.km/25*60+T.stops.length*5)+nAcc*12);return m<60?m+" min":Math.floor(m/60)+" h"+(m%60?" "+String(m%60).padStart(2,"0"):"")}
+/* esiti in Excel: una riga per cliente, in ordine di coppia e tappa */
+async function exportXls(P){
+  try{await loadXLSX()}catch(e){toast(e.message);return}
+  const E=getE(P),rows=[["Coppia","Tappa","Cliente","Insegna","Indirizzo","Lista","P.IVA","Categoria","Esito","Nota","Ora","ID cliente"]];
+  P.teams.forEach(T=>T.stops.forEach((s,i)=>s.acc.forEach(id=>{const c=P.clients[id]||{},e=E[id]||{};rows.push([T.code,i+1,c.rs||"",c.ins||"",c.addr||"",c.src||"",c.piva||"",c.cat||"",e.esito||"",e.nota||"",e.at||"",id])})));
+  (P.missing||[]).forEach(id=>{const c=P.clients[id]||{};rows.push(["","",c.rs||"",c.ins||"",c.addr||"",c.src||"",c.piva||"",c.cat||"","Indirizzo non trovato","","",id])});
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=[6,6,30,22,30,7,13,18,20,30,6,12].map(w=>({wch:w}));
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Esiti");
+  XLSX.writeFile(wb,"esiti-canvassing-"+(P.city||"").replace(/[^\w]+/g,"-")+"-"+P.date+".xlsx");
+}
 function stopDone(E,s){return s.acc.every(id=>E[id]&&E[id].esito)}
 function refreshProgress(P,T,justId){
   const E=getE(P);
