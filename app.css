@@ -130,3 +130,5 @@ body.hide-done .stop.done{display:none}
 .sub{font-size:14px;margin:14px 0 2px}
 .sync{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0;background:var(--ok)}
 .sync.off{background:var(--warn)}
+.pbar{flex:1 1 100%;order:9;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.pbar i{display:block;height:100%;width:0;border-radius:4px;transition:width .35s ease}
